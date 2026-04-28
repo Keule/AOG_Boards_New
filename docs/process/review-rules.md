@@ -1,34 +1,29 @@
 # Review-Regeln (verbindlich)
 
-## Grundsatz
-Review prüft strikt gegen die Task-Spec (Soll/Ist-Vergleich).
+## 1. Prüfgrundlage
+Review prüft strikt gegen die Task-Spec (Soll/Ist).
 
-## Was Review prüfen muss
-- harte Constraints,
-- exakte Dateivorgaben,
-- Akzeptanzkriterien,
-- Scope-Treue,
-- Regelkonformität (`AGENTS.md`, `agents/*`, Prozessdokumente).
+## 2. Stilabgrenzung
+Review prüft nicht nach persönlichem Stil.
 
-## Was Review nicht prüfen darf
-- persönlicher Stil,
-- subjektive Präferenzen ohne Spec-Bezug,
-- ungeforderte Architektur-Neuerfindung.
-
-## Entscheidungspflicht
-Der Reviewer muss genau eine Entscheidung ausgeben:
+## 3. Pflichtentscheidung
+Review MUSS genau eine Entscheidung liefern:
 - **ACCEPTED**
 - **REJECTED**
 
-## Pflichtinhalt bei REJECTED
-Bei **REJECTED** müssen zwingend enthalten sein:
-1. konkrete Abweichungen (Soll vs. Ist),
-2. **Root Cause**,
-3. **Lessons Learned**,
-4. Entscheidung: Neuaufgabe oder klar begrenzte Nacharbeit.
+## 4. Pflichtinhalt bei REJECTED
+Bei **REJECTED** MUSS das Review enthalten:
+- Root Cause,
+- Lessons Learned,
+- Empfehlung:
+  - vollständige Neuaufgabe
+  ODER
+  - klar begrenzte Nacharbeit.
 
-## Nacharbeits-Empfehlung
-Nacharbeit darf nur empfohlen werden, wenn der Fehler:
-- klein,
-- klar begrenzt,
-- ohne Architekturänderung korrigierbar ist.
+## 5. Regel für Nacharbeitsempfehlung
+Nacharbeit ist nur zulässig bei:
+- kleinem Fehler,
+- klar begrenztem Fehler.
+
+## 6. Verbot
+Reviewer darf keine neue Architektur erfinden.

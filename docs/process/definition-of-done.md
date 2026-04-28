@@ -1,35 +1,39 @@
-# Definition of Done (DoD)
+# Definition of Done (verbindlich)
 
 ## 1) Allgemeine Tasks
-Eine Aufgabe gilt nur als "Done", wenn:
+Eine Aufgabe ist nur dann abgeschlossen, wenn:
+- vollständige Umsetzung der Spec vorliegt,
 - alle geforderten Dateien vorhanden sind,
-- alle geforderten Inhalte im Sollzustand sind,
-- alle Akzeptanzkriterien erfüllt sind,
-- keine verbotenen Änderungen enthalten sind.
+- alle geforderten Inhalte im Sollzustand vorliegen,
+- alle Akzeptanzkriterien erfüllt sind.
 
 ## 2) Build-/Skeleton-Tasks
-Zusätzlich gilt:
-- Build muss funktionieren, **wenn Code betroffen ist**.
-- Keine Überimplementierung (nur Skeleton/Stub, wenn gefordert).
-- Keine verbotenen Includes.
-- Keine Layer-Verletzungen.
+Zusätzlich MUSS gelten:
+- Build ist erfolgreich, wenn Code betroffen ist.
+- keine verbotenen Includes.
+- keine Layerverletzung.
+- keine Überimplementierung.
 
-## 3) Architektur-/Dokumentations-Tasks
-Zusätzlich gilt:
-- Dokumente sind konsistent mit bestehenden Regeln (`AGENTS.md`, `agents/*`, ADRs).
-- Architekturentscheidungen werden nicht stillschweigend geändert.
-- Regeln sind klar, verbindlich und prüfbar formuliert.
+## 3) Architektur-/Doku-Tasks
+Zusätzlich MUSS gelten:
+- vollständige Umsetzung der dokumentierten Anforderungen.
+- keine Abschwächung bestehender Regeln.
+- keine implizite Architekturänderung.
+- Spec vollständig erfüllt.
 
 ## 4) Code-/Runtime-Tasks
-Zusätzlich gilt:
-- CMake-/Dependency-Angaben sind vollständig.
-- Keine Layer-Verletzungen (z. B. Protokoll ↔ HAL).
-- Keine verbotenen Includes.
-- Keine ungeforderte Zusatzlogik.
+Zusätzlich MUSS gelten:
+- Build ist erfolgreich, wenn Code betroffen ist.
+- keine verbotenen Includes.
+- keine Layerverletzung.
+- keine Überimplementierung.
+- CMake- und Dependency-Angaben sind vollständig.
+- Spec vollständig erfüllt.
 
 ## 5) Review-/Nacharbeits-Tasks
-Zusätzlich gilt:
-- Review entscheidet eindeutig: **ACCEPTED** oder **REJECTED**.
-- Bei **REJECTED** sind Root Cause und Lessons Learned benannt.
-- Nacharbeit bleibt klein, konkret und scope-treu.
+Zusätzlich MUSS gelten:
+- Review enthält zwingend **ACCEPTED** oder **REJECTED**.
+- bei **REJECTED** sind Root Cause und Lessons Learned enthalten.
 - Nacharbeit behebt nur benannte Mängel.
+- Nacharbeit erweitert Scope nicht.
+- Spec vollständig erfüllt.

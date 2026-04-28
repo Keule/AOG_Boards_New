@@ -1,107 +1,113 @@
 # Task-Typen (verbindlich)
 
 ## RSK
-**Zweck**
-- Regeln, Risiken, Safety-Grenzen und harte Verbote festlegen oder schärfen.
+### Zweck
+Regeln, Risiken und Sicherheitsvorgaben verbindlich festlegen oder schärfen.
 
-**Erlaubte Änderungen**
-- Regeltexte, Sicherheitsvorgaben, prüfbare Constraints in Dokumentation.
+### Erlaubte Änderungen
+- Regeltexte und Sicherheitsvorgaben im vorgegebenen Scope.
+- Präzisierungen, die Prüfbarkeit und Eindeutigkeit erhöhen.
 
-**Verbotene Änderungen**
-- funktionale Feature-Implementierungen ohne explizite Task-Freigabe.
+### Verbotene Änderungen
+- Feature-Implementierungen ohne explizite Freigabe.
+- Scope-Erweiterungen außerhalb der Spec.
 
-**Typische Akzeptanzkriterien**
-- Regeln sind eindeutig, testbar und widerspruchsfrei.
-- Verbote und Muss-Regeln sind klar benannt.
+### Typische Akzeptanzkriterien
+- Regeln sind eindeutig, prüfbar und widerspruchsfrei.
+- Verbote und Muss-Anforderungen sind explizit formuliert.
 
 ## ARC
-**Zweck**
-- Architekturstruktur und Schichtgrenzen definieren oder präzisieren.
+### Zweck
+Architekturstruktur, Schichten und Verantwortlichkeiten verbindlich definieren.
 
-**Erlaubte Änderungen**
-- Architektur-Dokumente, ADRs, Strukturvorgaben.
+### Erlaubte Änderungen
+- Architektur- und ADR-Dokumentation im expliziten Scope.
+- Präzisierung von Schichtgrenzen und Abhängigkeitsregeln.
 
-**Verbotene Änderungen**
-- Implementierung außerhalb des expliziten ARC-Scopes.
-- Schichtverletzungen durch implizite Abhängigkeiten.
+### Verbotene Änderungen
+- Implementierung außerhalb des ARC-Auftrags.
+- Verdeckte Architekturänderungen ohne Spec.
 
-**Typische Akzeptanzkriterien**
-- Schichten und Verantwortlichkeiten sind klar.
-- Dependencies sind nachvollziehbar und konsistent.
+### Typische Akzeptanzkriterien
+- Schichtgrenzen sind eindeutig dokumentiert.
+- Abhängigkeiten sind konsistent und nachvollziehbar.
 
 ## CRT
-**Zweck**
-- Core-Runtime-Strukturen (z. B. task-Skeletons, Runtime-Startpfad) definieren/umsetzen.
+### Zweck
+Core-Runtime-Strukturen gemäß Spec erstellen oder korrigieren.
 
-**Erlaubte Änderungen**
-- Runtime-bezogene Dateien laut Spec.
-- minimale Skeleton-Implementierungen.
+### Erlaubte Änderungen
+- Runtime-Dateien und Runtime-Skeletons im freigegebenen Scope.
+- Task-Startpfade und minimale Runtime-Aufrufe gemäß Vorgabe.
 
-**Verbotene Änderungen**
+### Verbotene Änderungen
 - zusätzliche Scheduler-/Registry-Logik ohne Auftrag.
-- HAL-/Hardware-/Protokollerweiterungen.
+- HAL-/Hardware-/Protokoll-Logik außerhalb CRT-Scope.
 
-**Typische Akzeptanzkriterien**
-- geforderte Runtime-Dateien exakt vorhanden.
-- Aufrufreihenfolge und Task-Parameter entsprechen der Spec.
+### Typische Akzeptanzkriterien
+- alle geforderten CRT-Dateien liegen exakt vor.
+- Aufrufreihenfolge, Delay- und Task-Parameter entsprechen der Spec.
 
 ## HAL
-**Zweck**
-- Hardware-Abstraktionsschicht bereitstellen.
+### Zweck
+Hardware-Abstraktionsschicht strikt getrennt von Fachlogik umsetzen.
 
-**Erlaubte Änderungen**
-- HAL-Interfaces und HAL-Implementierungen im vorgegebenen Scope.
+### Erlaubte Änderungen
+- HAL-Interfaces und HAL-Implementierungen laut Task-Spec.
+- Board- und Gerätezugriffe ausschließlich über HAL-Ebene.
 
-**Verbotene Änderungen**
-- Fachlogik in HAL.
+### Verbotene Änderungen
+- Fachlogik in HAL-Dateien.
 - Protokollentscheidungen in HAL.
 
-**Typische Akzeptanzkriterien**
-- HAL bleibt rein abstrahierend.
-- keine Layer-Verletzung.
+### Typische Akzeptanzkriterien
+- HAL ist rein abstrahierend.
+- Keine Layerverletzung zwischen HAL und Protokoll/Fachlogik.
 
 ## PRT
-**Zweck**
-- Protokoll- und transportnahe Logik definieren/implementieren.
+### Zweck
+Protokoll- und transportnahe Logik gemäß Spezifikation umsetzen.
 
-**Erlaubte Änderungen**
-- Protokollparser, Framing, Zustandslogik, Transportadapter laut Spec.
+### Erlaubte Änderungen
+- Parser-, Framing- und Zustandslogik im PRT-Scope.
+- Transportkopplung entsprechend den vorgegebenen Schnittstellen.
 
-**Verbotene Änderungen**
-- direkter Hardwarezugriff in Protokollschicht.
-- ungeforderte Architekturumbauten.
+### Verbotene Änderungen
+- direkter Hardwarezugriff in Protokolldateien.
+- ungeforderte Architektur- oder Layer-Änderungen.
 
-**Typische Akzeptanzkriterien**
-- Protokollverhalten entspricht Spec.
-- klare Trennung zu HAL und Fachlogik.
+### Typische Akzeptanzkriterien
+- Protokollverhalten entspricht der Spec.
+- Trennung zu HAL und Fachlogik ist eingehalten.
 
 ## HWM
-**Zweck**
-- Hardware-Mapping, Board-Profile, Pin-/Ressourcenzuordnung definieren.
+### Zweck
+Hardware-Mapping und Boardzuordnung reproduzierbar festlegen.
 
-**Erlaubte Änderungen**
-- Mapping-Dateien und Boardprofile im Scope.
+### Erlaubte Änderungen
+- Mapping-Dateien, Pin-Zuordnungen und Boardprofile im Scope.
+- Korrekturen an Mapping-Definitionen gemäß Task-Spec.
 
-**Verbotene Änderungen**
+### Verbotene Änderungen
 - fachliche Features ohne Mapping-Bezug.
-- implizite Architekturänderungen.
+- Architekturänderungen außerhalb HWM-Scope.
 
-**Typische Akzeptanzkriterien**
-- Mapping ist konsistent, reproduzierbar und vollständig.
-- keine unbegründeten Seiteneffekte.
+### Typische Akzeptanzkriterien
+- Mapping ist vollständig und konsistent.
+- Zuordnungen sind reproduzierbar und eindeutig.
 
 ## PROC
-**Zweck**
-- Prozess-, Rollen-, Review- und Qualitätsregeln dokumentieren.
+### Zweck
+Prozessregeln, Review-Abläufe und Qualitätskriterien verbindlich dokumentieren.
 
-**Erlaubte Änderungen**
-- Prozessdokumente in Markdown.
-- Präzisierung vorhandener Regeln ohne Abschwächung.
+### Erlaubte Änderungen
+- Prozessdokumente in Markdown im vorgegebenen Pfad.
+- Präzisierungen ohne Abschwächung bestehender Regeln.
 
-**Verbotene Änderungen**
-- Code-/Build-/Architekturänderungen.
+### Verbotene Änderungen
+- Code-, Build- oder Architekturänderungen.
 - Aufweichen harter Regeln.
 
-**Typische Akzeptanzkriterien**
-- Dokumente sind vollständig, konsistent und auf Deutsch.
+### Typische Akzeptanzkriterien
+- Dokumente sind vollständig, konsistent und deterministisch.
 - Regeln sind verbindlich, prüfbar und widerspruchsfrei.

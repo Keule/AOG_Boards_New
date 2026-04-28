@@ -1,25 +1,18 @@
-# Umgang mit Abweichungen (verbindlich)
+# Abweichungen (verbindlich)
 
 ## Zulässigkeit
-Abweichungen sind nur erlaubt, wenn:
-- die Spec technisch falsch ist **oder**
-- der Build/Funktionsfähigkeit sonst brechen würde.
+Eine Abweichung ist nur erlaubt bei:
+- technischem Fehler in der Spec,
+- sonstigem Buildbruch.
 
-## Pflicht bei erlaubter Abweichung
-Jede erlaubte Abweichung muss:
-- **benannt** werden,
-- **begründet** werden,
-- **minimal** bleiben,
-- im Review nachvollziehbar dokumentiert werden.
+## Pflichtanforderungen
+Jede erlaubte Abweichung MUSS:
+- benannt sein,
+- begründet sein,
+- minimal sein.
 
-## Verbotene Abweichungen
-Abweichungen dürfen **nicht**:
+## Verbotene Wirkung
+Eine Abweichung DARF NICHT:
 - Scope erweitern,
-- neue Features einführen,
-- Architektur ändern,
-- harte Regeln abschwächen.
-
-## Entscheidung bei großen Abweichungen
-Wenn eine minimale Korrektur nicht reicht:
-- Aufgabe verwerfen,
-- Task-Spec neu und eindeutig formulieren.
+- Features hinzufügen,
+- Architektur verändern.
