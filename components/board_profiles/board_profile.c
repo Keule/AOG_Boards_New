@@ -30,3 +30,66 @@ ethernet_kind_t board_profile_get_eth(void)
     ESP_LOGI(TAG, "Ethernet: %d", (int)eth);
     return eth;
 }
+
+bool board_profile_has_uart(board_uart_port_t port)
+{
+    switch (port) {
+    case BOARD_UART_CONSOLE:
+        return true;
+
+    case BOARD_UART_GNSS_PRIMARY:
+    case BOARD_UART_GNSS_SECONDARY:
+#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
+        return true;
+#else
+        return false;
+#endif
+
+    default:
+        return false;
+    }
+}
+
+bool board_profile_has_spi(board_spi_bus_t bus)
+{
+    switch (bus) {
+    case BOARD_SPI_ETHERNET:
+#if defined(ETH_KIND_W5500_SPI)
+        return true;
+#else
+        return false;
+#endif
+
+    case BOARD_SPI_DEVICE:
+#if defined(DEVICE_ROLE_STEERING) || defined(DEVICE_ROLE_FULL_TEST)
+        return true;
+#else
+        return false;
+#endif
+
+    case BOARD_SPI_STORAGE:
+        /* No board currently has storage SPI */
+        return false;
+
+    default:
+        return false;
+    }
+}
+
+unsigned int board_profile_get_features(void)
+{
+    unsigned int features = 0;
+
+    /* Ethernet is always available on all boards */
+    features |= BOARD_FEATURE_ETHERNET;
+
+#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
+    features |= BOARD_FEATURE_UART_GNSS;
+#endif
+
+#if defined(DEVICE_ROLE_STEERING) || defined(DEVICE_ROLE_FULL_TEST)
+    features |= BOARD_FEATURE_SPI_DEVICE;
+#endif
+
+    return features;
+}
