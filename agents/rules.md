@@ -1,5 +1,15 @@
 # Globale Regeln (VERPFLICHTEND)
 
+## Prozessreferenz (verbindlich)
+Die folgenden Prozessdokumente sind verbindlich und ergänzen diese Regeln:
+
+- `docs/process/workflow.md`
+- `docs/process/task-types.md`
+- `docs/process/definition-of-done.md`
+- `docs/process/review-rules.md`
+- `docs/process/deviations.md`
+- `docs/process/lessons-learned.md`
+
 ## 1. Kein implizites Wissen
 
 Agenten müssen davon ausgehen:
