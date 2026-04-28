@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "board_profile.c"
+    SRCS "runtime_stats.c"
     INCLUDE_DIRS "."
 )

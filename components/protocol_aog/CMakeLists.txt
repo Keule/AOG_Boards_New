@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "board_profile.c"
+    SRCS "protocol_aog.c"
     INCLUDE_DIRS "."
 )

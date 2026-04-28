@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "board_profile.c"
+    SRCS "byte_ring_buffer.c"
     INCLUDE_DIRS "."
 )

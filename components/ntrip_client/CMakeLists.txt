@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "board_profile.c"
+    SRCS "ntrip_client.c"
     INCLUDE_DIRS "."
 )
