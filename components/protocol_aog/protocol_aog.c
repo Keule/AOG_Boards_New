@@ -24,7 +24,6 @@ uint16_t aog_crc16(const uint8_t* data, size_t length)
 
     for (i = 0; i < length; i++) {
         uint8_t bit = 0;
-
         crc ^= (uint16_t)data[i] << 8U;
 
         for (bit = 0; bit < 8U; bit++) {
@@ -44,16 +43,11 @@ bool aog_encode_frame(const aog_frame_t* frame, uint8_t* out, size_t out_capacit
     size_t total_size = 0;
     uint16_t crc = 0;
 
-    if (frame == NULL || out == NULL || out_size == NULL) {
-        return false;
-    }
-
-    if (frame->payload_len > AOG_FRAME_MAX_PAYLOAD) {
+    if (frame == NULL || out == NULL || out_size == NULL || frame->payload_len > AOG_FRAME_MAX_PAYLOAD) {
         return false;
     }
 
     total_size = 1U + 2U + 2U + frame->payload_len + 2U;
-
     if (out_capacity < total_size) {
         return false;
     }
@@ -76,20 +70,11 @@ bool aog_decode_frame(const uint8_t* data, size_t data_len, aog_frame_t* out_fra
     uint16_t expected_crc = 0;
     uint16_t received_crc = 0;
 
-    if (data == NULL || out_frame == NULL) {
-        return false;
-    }
-
-    if (data_len < (1U + 2U + 2U + 2U)) {
-        return false;
-    }
-
-    if (data[0] != AOG_FRAME_START_BYTE) {
+    if (data == NULL || out_frame == NULL || data_len < (1U + 2U + 2U + 2U) || data[0] != AOG_FRAME_START_BYTE) {
         return false;
     }
 
     payload_len = read_u16_le(&data[1]);
-
     if (payload_len > AOG_FRAME_MAX_PAYLOAD) {
         return false;
     }
@@ -104,22 +89,29 @@ bool aog_decode_frame(const uint8_t* data, size_t data_len, aog_frame_t* out_fra
 
     expected_crc = aog_crc16(&data[1], (size_t)(2U + 2U + payload_len));
     received_crc = read_u16_le(&data[5U + payload_len]);
-
     return (expected_crc == received_crc);
 }
 
-bool aog_build_hello_response(const aog_version_t* version, aog_frame_t* out_frame)
+bool aog_is_hello_request(const aog_frame_t* frame)
+{
+    if (frame == NULL) {
+        return false;
+    }
+
+    return frame->pgn == (uint16_t)AOG_INTERNAL_ID_HELLO_REQUEST;
+}
+
+bool aog_build_discovery_response(const aog_version_t* version, aog_frame_t* out_frame)
 {
     if (version == NULL || out_frame == NULL) {
         return false;
     }
 
-    out_frame->pgn = (uint16_t)AOG_PGN_HELLO_RESPONSE;
+    out_frame->pgn = (uint16_t)AOG_INTERNAL_ID_HELLO_RESPONSE;
     out_frame->payload_len = 3;
     out_frame->payload[0] = version->major;
     out_frame->payload[1] = version->minor;
     out_frame->payload[2] = version->patch;
-
     return true;
 }
 
@@ -129,12 +121,11 @@ bool aog_build_position_out(const aog_position_t* position, aog_frame_t* out_fra
         return false;
     }
 
-    out_frame->pgn = (uint16_t)AOG_PGN_POSITION_OUT;
+    out_frame->pgn = (uint16_t)AOG_INTERNAL_ID_POSITION_OUT;
     out_frame->payload_len = 12;
     memcpy(&out_frame->payload[0], &position->latitude_e7, 4);
     memcpy(&out_frame->payload[4], &position->longitude_e7, 4);
     memcpy(&out_frame->payload[8], &position->altitude_mm, 4);
-
     return true;
 }
 
@@ -144,9 +135,8 @@ bool aog_build_heading_out(const aog_heading_t* heading, aog_frame_t* out_frame)
         return false;
     }
 
-    out_frame->pgn = (uint16_t)AOG_PGN_HEADING_OUT;
+    out_frame->pgn = (uint16_t)AOG_INTERNAL_ID_HEADING_OUT;
     out_frame->payload_len = 4;
     memcpy(&out_frame->payload[0], &heading->heading_mdeg, 4);
-
     return true;
 }
