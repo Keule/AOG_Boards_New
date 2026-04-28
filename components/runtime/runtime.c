@@ -7,8 +7,21 @@
 #include "rtcm_router.h"
 #include "aog_navigation_app.h"
 
+static int navigation_role_enabled(void)
+{
+#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 void runtime_init(void)
 {
+    if (navigation_role_enabled() == 0) {
+        return;
+    }
+
     gnss_um980_init();
     gnss_dual_heading_init();
     rtcm_router_init();

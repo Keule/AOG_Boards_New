@@ -3,23 +3,42 @@
 #include <string.h>
 
 #include "protocol_rtcm.h"
-#include "transport_uart.h"
-#include "hal_uart.h"
+#include "message_queue.h"
+#include "ntrip_client.h"
 
 #define RTCM_ROUTER_BUFFER_SIZE 512U
+#define RTCM_ROUTER_TX_QUEUE_CAPACITY 32U
 
 static uint8_t s_input_buffer[RTCM_ROUTER_BUFFER_SIZE];
 static size_t s_input_length = 0;
 static uint64_t s_last_input_time = 0;
 static rtcm_counters_t s_counters;
+static ntrip_client_t s_ntrip_client;
+static message_queue_t s_tx_queue;
+static rtcm_router_tx_item_t s_tx_storage[RTCM_ROUTER_TX_QUEUE_CAPACITY];
+
+static void queue_uart_tx(hal_uart_port_t port, const uint8_t* data, size_t length)
+{
+    rtcm_router_tx_item_t item;
+
+    if (data == 0 || length == 0 || length > sizeof(item.payload)) {
+        return;
+    }
+
+    item.port = port;
+    item.length = length;
+    memcpy(item.payload, data, length);
+    message_queue_push(&s_tx_queue, &item);
+}
 
 static void rtcm_router_fast_process(runtime_component_t* component, const fast_cycle_context_t* ctx)
 {
     uint8_t out_buffer[RTCM_ROUTER_BUFFER_SIZE];
     size_t out_size = 0;
-    size_t written = 0;
 
     (void)component;
+
+    ntrip_client_step(&s_ntrip_client);
 
     if (s_input_length == 0) {
         return;
@@ -35,8 +54,8 @@ static void rtcm_router_fast_process(runtime_component_t* component, const fast_
     );
 
     if (out_size > 0) {
-        transport_uart_write_nonblocking(HAL_UART_PORT_GNSS_PRIMARY, out_buffer, out_size, &written);
-        transport_uart_write_nonblocking(HAL_UART_PORT_GNSS_SECONDARY, out_buffer, out_size, &written);
+        queue_uart_tx(HAL_UART_PORT_GNSS_PRIMARY, out_buffer, out_size);
+        queue_uart_tx(HAL_UART_PORT_GNSS_SECONDARY, out_buffer, out_size);
     }
 
     s_input_length = 0;
@@ -55,6 +74,9 @@ int rtcm_router_init(void)
     s_input_length = 0;
     s_last_input_time = 0;
     rtcm_passthrough_init(&s_counters);
+    ntrip_client_init(&s_ntrip_client);
+    ntrip_client_request_connect(&s_ntrip_client);
+    message_queue_init(&s_tx_queue, s_tx_storage, sizeof(rtcm_router_tx_item_t), RTCM_ROUTER_TX_QUEUE_CAPACITY);
     return 0;
 }
 
@@ -76,4 +98,9 @@ void rtcm_router_push_from_ntrip(const uint8_t* data, size_t length, uint64_t no
     memcpy(s_input_buffer, data, length);
     s_input_length = length;
     s_last_input_time = now_us;
+}
+
+bool rtcm_router_pop_uart_tx(rtcm_router_tx_item_t* out_item)
+{
+    return message_queue_pop(&s_tx_queue, out_item);
 }
