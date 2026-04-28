@@ -5,6 +5,15 @@
 static runtime_component_t* s_components[RUNTIME_COMPONENT_MAX];
 static size_t s_component_count = 0;
 
+void runtime_component_clear_all(void)
+{
+    size_t i;
+    for (i = 0; i < RUNTIME_COMPONENT_MAX; ++i) {
+        s_components[i] = NULL;
+    }
+    s_component_count = 0;
+}
+
 int runtime_component_register(runtime_component_t* component)
 {
     if (component == NULL) {

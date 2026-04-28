@@ -34,6 +34,7 @@ struct runtime_component {
     runtime_component_service_fn_t service_step;
 };
 
+void runtime_component_clear_all(void);
 int runtime_component_register(runtime_component_t* component);
 size_t runtime_component_count(void);
 runtime_component_t* runtime_component_get(size_t index);

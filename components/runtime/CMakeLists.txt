@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "runtime.c"
     INCLUDE_DIRS "."
-    REQUIRES runtime_fast
+    REQUIRES runtime_fast runtime_components
 )

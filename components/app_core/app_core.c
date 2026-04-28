@@ -59,6 +59,8 @@ void app_core_init(void)
 {
     ESP_LOGI(TAG, "System init");
 
+    runtime_init();
+
     unsigned int features = feature_flags_get();
 
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
@@ -165,6 +167,5 @@ void app_core_init(void)
 
 void app_core_start(void)
 {
-    runtime_init();
     runtime_start();
 }
