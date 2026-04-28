@@ -1,4 +1,5 @@
 idf_component_register(
-    SRCS "board_profile.c"
+    SRCS "hal_time.c"
     INCLUDE_DIRS "."
+    REQUIRES esp_timer
 )
