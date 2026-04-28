@@ -1,107 +1,92 @@
 #include "aog_navigation_app.h"
 
-#include "gnss_um980.h"
-#include "gnss_dual_heading.h"
-#include "protocol_aog.h"
-#include "message_queue.h"
+#include <string.h>
 
-#define AOG_NAV_TX_QUEUE_CAPACITY 32U
-
-static message_queue_t s_tx_queue;
-static aog_navigation_tx_item_t s_tx_storage[AOG_NAV_TX_QUEUE_CAPACITY];
-static bool s_hello_request_pending = false;
-
-static void queue_aog_frame(aog_navigation_tx_kind_t kind, const aog_frame_t* frame)
+static bool is_discovery_request(const aog_frame_t* frame)
 {
-    aog_navigation_tx_item_t item;
-    size_t encoded_size = 0;
+    return (frame != 0 && frame->length > 0 && frame->data[0] == 0xA1U);
+}
 
-    if (frame == 0) {
+static void push_hello_response(aog_navigation_app_t* app)
+{
+    aog_frame_t out = {0};
+    out.data[0] = 0xA2U;
+    out.length = 1;
+    message_queue_push(&app->tx_queue, &out);
+}
+
+static void push_position_heading(aog_navigation_app_t* app)
+{
+    gnss_snapshot_t gnss;
+    heading_snapshot_t heading;
+    aog_frame_t out = {0};
+
+    if (!gnss_um980_get_snapshot(app->primary, &gnss)) {
         return;
     }
 
-    if (!aog_encode_frame(frame, item.payload, sizeof(item.payload), &encoded_size)) {
+    out.data[0] = 0xB1U;
+    out.length = 1;
+    if (gnss_dual_heading_get_snapshot(app->heading, &heading)) {
+        out.data[1] = (uint8_t)((int)heading.heading_deg & 0xFF);
+        out.length = 2;
+    }
+
+    message_queue_push(&app->tx_queue, &out);
+}
+
+static void aog_navigation_component_step(runtime_component_t* component)
+{
+    aog_navigation_app_t* app = 0;
+    if (component == 0) {
         return;
     }
 
-    item.kind = kind;
-    item.length = encoded_size;
-    message_queue_push(&s_tx_queue, &item);
+    app = (aog_navigation_app_t*)component->user_data;
+    aog_navigation_app_step(app);
 }
 
-static void aog_navigation_fast_output(runtime_component_t* component, const fast_cycle_context_t* ctx)
+void aog_navigation_app_init(aog_navigation_app_t* app, const gnss_um980_t* primary, const gnss_dual_heading_t* heading)
 {
-    const gnss_um980_receiver_data_t* primary = gnss_um980_primary();
-    const gnss_dual_heading_data_t* heading = gnss_dual_heading_get();
-    aog_frame_t frame;
-
-    (void)component;
-    (void)ctx;
-
-    if (s_hello_request_pending) {
-        aog_version_t version = {1, 0, 0};
-        if (aog_build_discovery_response(&version, &frame)) {
-            queue_aog_frame(AOG_NAV_TX_DISCOVERY, &frame);
-        }
-        s_hello_request_pending = false;
+    if (app == 0) {
+        return;
     }
 
-    if (primary->valid) {
-        aog_position_t position;
-        position.latitude_e7 = primary->latitude_e7;
-        position.longitude_e7 = primary->longitude_e7;
-        position.altitude_mm = primary->altitude_mm;
-
-        if (aog_build_position_out(&position, &frame)) {
-            queue_aog_frame(AOG_NAV_TX_POSITION, &frame);
-        }
-    }
-
-    if (heading->valid) {
-        aog_heading_t h;
-        h.heading_mdeg = heading->heading_mdeg;
-
-        if (aog_build_heading_out(&h, &frame)) {
-            queue_aog_frame(AOG_NAV_TX_HEADING, &frame);
-        }
-    }
+    memset(app, 0, sizeof(*app));
+    app->primary = primary;
+    app->heading = heading;
+    message_queue_init(&app->rx_queue, app->rx_storage, sizeof(aog_frame_t), 8);
+    message_queue_init(&app->tx_queue, app->tx_storage, sizeof(aog_frame_t), 8);
+    app->component.name = "aog_navigation_app";
+    app->component.user_data = app;
+    app->component.step = aog_navigation_component_step;
 }
 
-static runtime_component_t s_component = {
-    .name = "aog_navigation_app",
-    .user_data = 0,
-    .fast_input = 0,
-    .fast_process = 0,
-    .fast_output = aog_navigation_fast_output,
-};
-
-int aog_navigation_app_init(void)
+bool aog_navigation_app_feed_rx(aog_navigation_app_t* app, const aog_frame_t* frame)
 {
-    message_queue_init(&s_tx_queue, s_tx_storage, sizeof(aog_navigation_tx_item_t), AOG_NAV_TX_QUEUE_CAPACITY);
-    s_hello_request_pending = false;
-    return 0;
+    return (app != 0 && frame != 0) ? message_queue_push(&app->rx_queue, frame) : false;
 }
 
-runtime_component_t* aog_navigation_app_component(void)
+bool aog_navigation_app_pop_tx(aog_navigation_app_t* app, aog_frame_t* out_frame)
 {
-    return &s_component;
+    return (app != 0 && out_frame != 0) ? message_queue_pop(&app->tx_queue, out_frame) : false;
 }
 
-bool aog_navigation_app_push_rx_frame(const aog_frame_t* frame)
+void aog_navigation_app_step(aog_navigation_app_t* app)
 {
-    if (frame == 0) {
-        return false;
+    aog_frame_t in = {0};
+    if (app == 0) {
+        return;
     }
 
-    if (aog_is_hello_request(frame)) {
-        s_hello_request_pending = true;
-        return true;
+    if (message_queue_pop(&app->rx_queue, &in) && is_discovery_request(&in)) {
+        push_hello_response(app);
     }
 
-    return false;
+    push_position_heading(app);
 }
 
-bool aog_navigation_app_pop_tx(aog_navigation_tx_item_t* out_item)
+runtime_component_t* aog_navigation_app_component(aog_navigation_app_t* app)
 {
-    return message_queue_pop(&s_tx_queue, out_item);
+    return (app != 0) ? &app->component : 0;
 }

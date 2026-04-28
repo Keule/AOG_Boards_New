@@ -1,39 +1,49 @@
 #include "runtime.h"
-#include "task_fast.h"
 
-#include "runtime_component.h"
-#include "gnss_um980.h"
-#include "gnss_dual_heading.h"
-#include "rtcm_router.h"
-#include "aog_navigation_app.h"
+#define RUNTIME_MAX_COMPONENTS 16U
 
-static int navigation_role_enabled(void)
-{
-#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
-    return 1;
-#else
-    return 0;
-#endif
-}
+static runtime_component_t* s_components[RUNTIME_MAX_COMPONENTS];
+static size_t s_count = 0;
+static bool s_started = false;
 
 void runtime_init(void)
 {
-    if (navigation_role_enabled() == 0) {
-        return;
+    size_t i = 0;
+    for (i = 0; i < RUNTIME_MAX_COMPONENTS; ++i) {
+        s_components[i] = 0;
+    }
+    s_count = 0;
+    s_started = false;
+}
+
+bool runtime_register(runtime_component_t* component)
+{
+    if (component == 0 || s_count >= RUNTIME_MAX_COMPONENTS) {
+        return false;
     }
 
-    gnss_um980_init();
-    gnss_dual_heading_init();
-    rtcm_router_init();
-    aog_navigation_app_init();
-
-    runtime_component_register(gnss_um980_component());
-    runtime_component_register(gnss_dual_heading_component());
-    runtime_component_register(rtcm_router_component());
-    runtime_component_register(aog_navigation_app_component());
+    s_components[s_count++] = component;
+    return true;
 }
 
 void runtime_start(void)
 {
-    task_fast_start();
+    s_started = true;
+}
+
+void runtime_step_once(void)
+{
+    size_t i = 0;
+    if (!s_started) {
+        return;
+    }
+
+    for (i = 0; i < s_count; ++i) {
+        runtime_component_step(s_components[i]);
+    }
+}
+
+size_t runtime_registered_count(void)
+{
+    return s_count;
 }

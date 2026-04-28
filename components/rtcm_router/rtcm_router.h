@@ -1,26 +1,27 @@
 #pragma once
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include "byte_ring_buffer.h"
 #include "runtime_component.h"
-#include "hal_uart.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct {
-    hal_uart_port_t port;
-    uint8_t payload[512];
-    size_t length;
-} rtcm_router_tx_item_t;
+    byte_ring_buffer_t* output_buffers[4];
+    size_t output_count;
+    byte_ring_buffer_t* input_buffer;
+    runtime_component_t component;
+} rtcm_router_t;
 
-int rtcm_router_init(void);
-runtime_component_t* rtcm_router_component(void);
-void rtcm_router_push_from_ntrip(const uint8_t* data, size_t length, uint64_t now_us);
-bool rtcm_router_pop_uart_tx(rtcm_router_tx_item_t* out_item);
+void rtcm_router_init(rtcm_router_t* router, byte_ring_buffer_t* input_buffer);
+int rtcm_router_register_output(rtcm_router_t* router, byte_ring_buffer_t* output_buffer);
+size_t rtcm_router_push_input(rtcm_router_t* router, const uint8_t* data, size_t length);
+void rtcm_router_step(rtcm_router_t* router);
+runtime_component_t* rtcm_router_component(rtcm_router_t* router);
 
 #ifdef __cplusplus
 }

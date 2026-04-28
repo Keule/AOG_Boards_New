@@ -1,25 +1,36 @@
 #include "transport_tcp.h"
 
-int transport_tcp_init(void)
+void transport_tcp_init(transport_tcp_t* transport)
 {
-    return 0;
+    if (transport == 0) {
+        return;
+    }
+
+    byte_ring_buffer_init(&transport->rx_raw, transport->rx_storage, sizeof(transport->rx_storage));
+    byte_ring_buffer_init(&transport->tx_raw, transport->tx_storage, sizeof(transport->tx_storage));
 }
 
-int transport_tcp_send(const uint8_t* data, size_t length, size_t* sent)
+size_t transport_tcp_feed_rx_raw(transport_tcp_t* transport, const uint8_t* data, size_t length)
 {
-    (void)data;
-    if (sent != 0) {
-        *sent = length;
-    }
-    return 0;
+    return (transport != 0) ? byte_ring_buffer_push(&transport->rx_raw, data, length) : 0;
 }
 
-int transport_tcp_receive(uint8_t* out_data, size_t max_length, size_t* received)
+size_t transport_tcp_pop_rx_raw(transport_tcp_t* transport, uint8_t* out_data, size_t max_length)
 {
-    (void)out_data;
-    (void)max_length;
-    if (received != 0) {
-        *received = 0;
-    }
-    return 0;
+    return (transport != 0) ? byte_ring_buffer_pop(&transport->rx_raw, out_data, max_length) : 0;
+}
+
+size_t transport_tcp_push_tx_raw(transport_tcp_t* transport, const uint8_t* data, size_t length)
+{
+    return (transport != 0) ? byte_ring_buffer_push(&transport->tx_raw, data, length) : 0;
+}
+
+size_t transport_tcp_drain_tx_raw(transport_tcp_t* transport, uint8_t* out_data, size_t max_length)
+{
+    return (transport != 0) ? byte_ring_buffer_pop(&transport->tx_raw, out_data, max_length) : 0;
+}
+
+void transport_tcp_service_step(transport_tcp_t* transport)
+{
+    (void)transport;
 }

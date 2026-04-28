@@ -1,59 +1,61 @@
 #include "gnss_dual_heading.h"
 
-#include <math.h>
+#include <string.h>
 
-#include "gnss_um980.h"
-
-static gnss_dual_heading_data_t s_heading;
-
-static void gnss_dual_heading_fast_process(runtime_component_t* component, const fast_cycle_context_t* ctx)
+static void gnss_dual_heading_component_step(runtime_component_t* component)
 {
-    const gnss_um980_receiver_data_t* p = gnss_um980_primary();
-    const gnss_um980_receiver_data_t* s = gnss_um980_secondary();
-    double lat1 = 0.0;
-    double lon1 = 0.0;
-    double lat2 = 0.0;
-    double lon2 = 0.0;
-    double heading_rad = 0.0;
-
-    (void)component;
-    (void)ctx;
-
-    if (!p->valid || !s->valid) {
-        s_heading.valid = false;
+    gnss_dual_heading_t* instance = 0;
+    if (component == 0) {
         return;
     }
 
-    lat1 = p->latitude_e7 / 10000000.0;
-    lon1 = p->longitude_e7 / 10000000.0;
-    lat2 = s->latitude_e7 / 10000000.0;
-    lon2 = s->longitude_e7 / 10000000.0;
-
-    heading_rad = atan2((lon2 - lon1), (lat2 - lat1));
-    s_heading.heading_mdeg = (int32_t)(heading_rad * (180.0 / 3.14159265358979323846) * 1000.0);
-    s_heading.valid = true;
+    instance = (gnss_dual_heading_t*)component->user_data;
+    gnss_dual_heading_step(instance);
 }
 
-static runtime_component_t s_component = {
-    .name = "gnss_dual_heading",
-    .user_data = 0,
-    .fast_input = 0,
-    .fast_process = gnss_dual_heading_fast_process,
-    .fast_output = 0,
-};
-
-int gnss_dual_heading_init(void)
+void gnss_dual_heading_init(gnss_dual_heading_t* instance, const gnss_um980_t* primary, const gnss_um980_t* secondary)
 {
-    s_heading = (gnss_dual_heading_data_t){0};
-    return 0;
+    if (instance == 0) {
+        return;
+    }
+
+    memset(instance, 0, sizeof(*instance));
+    instance->primary = primary;
+    instance->secondary = secondary;
+    instance->component.name = "gnss_dual_heading";
+    instance->component.user_data = instance;
+    instance->component.step = gnss_dual_heading_component_step;
 }
 
-runtime_component_t* gnss_dual_heading_component(void)
+void gnss_dual_heading_step(gnss_dual_heading_t* instance)
 {
-    return &s_component;
+    gnss_snapshot_t p;
+    gnss_snapshot_t s;
+
+    if (instance == 0) {
+        return;
+    }
+
+    if (!gnss_um980_get_snapshot(instance->primary, &p) || !gnss_um980_get_snapshot(instance->secondary, &s)) {
+        return;
+    }
+
+    instance->snapshot.valid = true;
+    instance->snapshot.heading_deg = (s.longitude_deg >= p.longitude_deg) ? 90.0f : 270.0f;
+    instance->snapshot.timestamp_ms = (p.timestamp_ms > s.timestamp_ms) ? p.timestamp_ms : s.timestamp_ms;
 }
 
-const gnss_dual_heading_data_t* gnss_dual_heading_get(void)
+bool gnss_dual_heading_get_snapshot(const gnss_dual_heading_t* instance, heading_snapshot_t* out_snapshot)
 {
-    return &s_heading;
+    if (instance == 0 || out_snapshot == 0 || !instance->snapshot.valid) {
+        return false;
+    }
+
+    *out_snapshot = instance->snapshot;
+    return true;
+}
+
+runtime_component_t* gnss_dual_heading_component(gnss_dual_heading_t* instance)
+{
+    return (instance != 0) ? &instance->component : 0;
 }
