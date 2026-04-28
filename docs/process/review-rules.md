@@ -1,19 +1,34 @@
-# Review-Regeln
+# Review-Regeln (verbindlich)
 
-## Grundprinzip
-Review basiert auf **Soll/Ist-Vergleich**.
+## Grundsatz
+Review prüft strikt gegen die Task-Spec (Soll/Ist-Vergleich).
 
-## Verbindliche Prüfschritte
-1. Tasktext und harte Constraints prüfen.
-2. Geänderte Dateien gegen explizite Dateivorgaben prüfen.
-3. Unerlaubte Zusatzlogik/Scope-Drift prüfen.
-4. Akzeptanzkriterien einzeln abhaken.
-5. Ergebnis als Accept oder Reject festhalten.
+## Was Review prüfen muss
+- harte Constraints,
+- exakte Dateivorgaben,
+- Akzeptanzkriterien,
+- Scope-Treue,
+- Regelkonformität (`AGENTS.md`, `agents/*`, Prozessdokumente).
 
-## Bewertungsmaßstab
-- **Accept**: keine relevante Abweichung.
-- **Reject**: mindestens eine relevante Abweichung.
+## Was Review nicht prüfen darf
+- persönlicher Stil,
+- subjektive Präferenzen ohne Spec-Bezug,
+- ungeforderte Architektur-Neuerfindung.
 
-## Nacharbeit
-- Nur bei klar eingrenzbarer Abweichung und kleinem Scope.
-- Nacharbeit muss konkrete Sollkorrekturen enthalten.
+## Entscheidungspflicht
+Der Reviewer muss genau eine Entscheidung ausgeben:
+- **ACCEPTED**
+- **REJECTED**
+
+## Pflichtinhalt bei REJECTED
+Bei **REJECTED** müssen zwingend enthalten sein:
+1. konkrete Abweichungen (Soll vs. Ist),
+2. **Root Cause**,
+3. **Lessons Learned**,
+4. Entscheidung: Neuaufgabe oder klar begrenzte Nacharbeit.
+
+## Nacharbeits-Empfehlung
+Nacharbeit darf nur empfohlen werden, wenn der Fehler:
+- klein,
+- klar begrenzt,
+- ohne Architekturänderung korrigierbar ist.

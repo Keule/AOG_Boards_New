@@ -1,37 +1,35 @@
 # Definition of Done (DoD)
 
-## Global
-Eine Aufgabe ist nur dann "Done", wenn:
-- alle geforderten Dateien im Sollzustand vorliegen,
-- keine unerlaubten Zusatzänderungen enthalten sind,
-- Review ohne offene Abweichung abgeschlossen ist.
+## 1) Allgemeine Tasks
+Eine Aufgabe gilt nur als "Done", wenn:
+- alle geforderten Dateien vorhanden sind,
+- alle geforderten Inhalte im Sollzustand sind,
+- alle Akzeptanzkriterien erfüllt sind,
+- keine verbotenen Änderungen enthalten sind.
 
-## DoD je Task-Typ
-### RSK
-- Sicherheits-/Regelvorgaben vollständig umgesetzt.
-- Keine unkontrollierten Seiteneffekte.
+## 2) Build-/Skeleton-Tasks
+Zusätzlich gilt:
+- Build muss funktionieren, **wenn Code betroffen ist**.
+- Keine Überimplementierung (nur Skeleton/Stub, wenn gefordert).
+- Keine verbotenen Includes.
+- Keine Layer-Verletzungen.
 
-### ARC
-- Zielarchitektur gemäß Vorgabe umgesetzt.
-- Schicht- und Dependency-Regeln eingehalten.
+## 3) Architektur-/Dokumentations-Tasks
+Zusätzlich gilt:
+- Dokumente sind konsistent mit bestehenden Regeln (`AGENTS.md`, `agents/*`, ADRs).
+- Architekturentscheidungen werden nicht stillschweigend geändert.
+- Regeln sind klar, verbindlich und prüfbar formuliert.
 
-### CRT
-- Runtime-Struktur exakt wie spezifiziert.
-- Keine zusätzliche Scheduler-/Registry-Logik.
-- Task-Parameter exakt gemäß Vorgabe.
+## 4) Code-/Runtime-Tasks
+Zusätzlich gilt:
+- CMake-/Dependency-Angaben sind vollständig.
+- Keine Layer-Verletzungen (z. B. Protokoll ↔ HAL).
+- Keine verbotenen Includes.
+- Keine ungeforderte Zusatzlogik.
 
-### HAL
-- HAL-API korrekt, ohne Fachlogik.
-- Kein Protokollcode in HAL.
-
-### PRT
-- Protokolllogik vollständig, ohne Hardwarezugriff.
-- Schnittstellen zu anderen Schichten klar.
-
-### HWM
-- Hardware-Mapping korrekt und reproduzierbar.
-- Keine fachliche Erweiterung außerhalb Mapping/Profil.
-
-### PROC
-- Dokumente vollständig vorhanden.
-- Inhalte konsistent, widerspruchsfrei und auf Deutsch.
+## 5) Review-/Nacharbeits-Tasks
+Zusätzlich gilt:
+- Review entscheidet eindeutig: **ACCEPTED** oder **REJECTED**.
+- Bei **REJECTED** sind Root Cause und Lessons Learned benannt.
+- Nacharbeit bleibt klein, konkret und scope-treu.
+- Nacharbeit behebt nur benannte Mängel.

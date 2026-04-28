@@ -1,8 +1,10 @@
-# Lessons Learned (RSK/ARC/CRT)
+# Lessons Learned (verbindlich)
 
-1. Kurze, exakte Prompts funktionieren besser als überladene Prompts.
-2. Exakte Dateivorgaben sind besser als abstrakte Regeln.
-3. Agenten dürfen sinnvolle technische Abweichungen nur begründet durchführen.
-4. Review muss Soll/Ist vergleichen.
-5. Nacharbeit ist erlaubt, wenn Scope klein und Fehler klar ist.
-6. Bei großer Abweichung wird die Aufgabe verworfen und neu formuliert.
+1. Exakte Dateivorgaben funktionieren besser als lange Meta-Regeln.
+2. Zu viele Zusatzregeln können schlechtere Ergebnisse erzeugen.
+3. Kleine Tasks sind stabiler als große Tasks.
+4. Dokumentation muss Architekturentscheidungen als harte Regeln festschreiben.
+5. Entwickler-Agenten dürfen nicht auf Chat-Kontext angewiesen sein.
+6. Reviewer müssen Spec und Ergebnis konkret vergleichen.
+7. Self-Validation durch Agenten ersetzt kein Review.
+8. Gute Abweichungen müssen dokumentiert und begründet werden.

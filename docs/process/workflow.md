@@ -1,30 +1,48 @@
-# Workflow (verbindlich)
+# Workflow für agentengestützte Entwicklung (verbindlich)
 
-## Ziel
-Dieser Workflow beschreibt den verbindlichen Ablauf für agentengestützte Aufgaben im Repository.
+## Zweck
+Dieses Dokument definiert den verbindlichen Standardablauf für Aufgaben im Repository.
 
-## Prozess
-1. **Plan**
-   - Planner analysiert die Aufgabe.
-   - Planner definiert Scope, betroffene Dateien und Prüfschritte.
+## Grundprozess
+1. **Planung**
 2. **Implementierung**
-   - Developer setzt die Aufgabe exakt gemäß Plan und Task-Vorgaben um.
-   - Keine Scope-Erweiterung ohne explizite Begründung.
 3. **Review**
-   - Reviewer vergleicht Soll/Ist anhand Tasktext, Dateivorgaben und Regeln.
-   - Review erfolgt dateibezogen und nachvollziehbar.
-4. **Accept / Reject**
-   - **Accept**, wenn alle Akzeptanzkriterien erfüllt sind.
-   - **Reject**, wenn Abweichungen bestehen.
-5. **Nacharbeit (falls Reject)**
-   - Nacharbeitsplan mit minimalem Scope.
-   - Danach erneuter Soll/Ist-Review.
+4. **Entscheidung**
+
+Der Ablauf ist strikt sequenziell: Erst wenn ein Schritt abgeschlossen ist, beginnt der nächste.
 
 ## Rollen
-- **Planner**: erstellt klaren, prüfbaren Umsetzungsplan.
-- **Developer**: implementiert exakt und minimal.
-- **Reviewer / Nacharbeitsplaner**: prüft, entscheidet Accept/Reject und formuliert ggf. Nacharbeit.
+- **Planer-Agent**
+  - erstellt eine vollständige, eigenständige Task-Spec,
+  - definiert Scope, Dateien, harte Constraints und Akzeptanzkriterien.
+- **Entwickler-Agent**
+  - setzt die Spec exakt um,
+  - erweitert Scope nicht,
+  - trifft keine neuen Architekturentscheidungen.
+- **Reviewer- + Nacharbeitsplaner-Agent**
+  - prüft strikt gegen die Spec,
+  - entscheidet **ACCEPTED** oder **REJECTED**,
+  - formuliert bei Bedarf eine Nacharbeit oder Neuaufgabe.
+
+## Entscheidung im Review
+Die Entscheidung muss exakt eine der folgenden sein:
+- **ACCEPTED**
+- **REJECTED**
+
+## Verhalten bei REJECTED
+Bei **REJECTED** sind genau zwei Wege erlaubt:
+1. **vollständige Neuaufgabe**, wenn Abweichung groß/strukturell ist,
+2. **klar begrenzte Nacharbeit**, wenn Fehler klein und präzise korrigierbar ist.
+
+## Regeln für Nacharbeit
+Nacharbeit darf ausschließlich konkrete Review-Mängel beheben.
+
+Nacharbeit darf **nicht**:
+- Scope erweitern,
+- Architektur ändern,
+- zusätzliche Features einführen,
+- neue Nebenbaustellen öffnen.
 
 ## No-Drift-Regel
-Zwischen Plan, Implementierung und Review darf kein inhaltlicher Drift entstehen.
-Änderungen außerhalb des freigegebenen Scopes sind zu markieren und zu begründen.
+Plan, Implementierung und Review müssen auf derselben Spec basieren.
+Abweichungen ohne dokumentierte Begründung gelten als Prozessfehler.

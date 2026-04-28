@@ -1,20 +1,25 @@
-# Umgang mit Abweichungen
+# Umgang mit Abweichungen (verbindlich)
 
-## Grundsatz
-Abweichungen vom Task-Soll sind nur zulässig, wenn sie technisch notwendig sind.
+## Zulässigkeit
+Abweichungen sind nur erlaubt, wenn:
+- die Spec technisch falsch ist **oder**
+- der Build/Funktionsfähigkeit sonst brechen würde.
 
-## Erlaubte Abweichung
-Eine technische Abweichung ist nur zulässig, wenn:
-- sie **zwingend** für Build/Funktionsfähigkeit ist,
-- sie **minimal** bleibt,
-- sie **explizit begründet** wird,
-- sie im Review als bewusste Abweichung dokumentiert wird.
+## Pflicht bei erlaubter Abweichung
+Jede erlaubte Abweichung muss:
+- **benannt** werden,
+- **begründet** werden,
+- **minimal** bleiben,
+- im Review nachvollziehbar dokumentiert werden.
 
-## Nicht erlaubte Abweichung
-- unbegründete Feature-Erweiterungen,
-- Architekturänderungen außerhalb des Scopes,
-- stillschweigende Interpretation gegen explizite Vorgaben.
+## Verbotene Abweichungen
+Abweichungen dürfen **nicht**:
+- Scope erweitern,
+- neue Features einführen,
+- Architektur ändern,
+- harte Regeln abschwächen.
 
-## Eskalation
-- Kleine, klare Abweichung: Nacharbeit.
-- Große Abweichung: Aufgabe verwerfen und neu formulieren.
+## Entscheidung bei großen Abweichungen
+Wenn eine minimale Korrektur nicht reicht:
+- Aufgabe verwerfen,
+- Task-Spec neu und eindeutig formulieren.
