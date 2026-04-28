@@ -34,11 +34,17 @@ static void queue_uart_tx(hal_uart_port_t port, const uint8_t* data, size_t leng
 static void rtcm_router_fast_process(runtime_component_t* component, const fast_cycle_context_t* ctx)
 {
     uint8_t out_buffer[RTCM_ROUTER_BUFFER_SIZE];
+    uint8_t ntrip_data[RTCM_ROUTER_BUFFER_SIZE];
+    size_t ntrip_length = 0;
     size_t out_size = 0;
 
     (void)component;
 
     ntrip_client_step(&s_ntrip_client);
+
+    if (ntrip_client_pop_rtcm(&s_ntrip_client, ntrip_data, sizeof(ntrip_data), &ntrip_length) == 0 && ntrip_length > 0) {
+        rtcm_router_push_from_ntrip(ntrip_data, ntrip_length, (ctx != 0) ? ctx->timestamp_us : s_last_input_time);
+    }
 
     if (s_input_length == 0) {
         return;
