@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "protocol_nmea.h"
+
 static void gnss_um980_component_step(runtime_component_t* component)
 {
     gnss_um980_t* instance = 0;
@@ -11,6 +13,38 @@ static void gnss_um980_component_step(runtime_component_t* component)
 
     instance = (gnss_um980_t*)component->user_data;
     gnss_um980_consume_rx(instance);
+}
+
+static void gnss_um980_handle_nmea_line(gnss_um980_t* instance, const char* line)
+{
+    nmea_solution_t solution;
+
+    memset(&solution, 0, sizeof(solution));
+    solution.has_fix = instance->snapshot.has_fix;
+    solution.latitude_deg = instance->snapshot.latitude_deg;
+    solution.longitude_deg = instance->snapshot.longitude_deg;
+    solution.altitude_m = instance->snapshot.altitude_m;
+    solution.speed_knots = instance->snapshot.speed_knots;
+    solution.course_deg = instance->snapshot.course_deg;
+    solution.sigma_lat_m = instance->snapshot.sigma_lat_m;
+    solution.sigma_lon_m = instance->snapshot.sigma_lon_m;
+    solution.sigma_alt_m = instance->snapshot.sigma_alt_m;
+
+    if (!protocol_nmea_parse_line(line, &solution)) {
+        return;
+    }
+
+    instance->snapshot.valid = true;
+    instance->snapshot.has_fix = solution.has_fix;
+    instance->snapshot.latitude_deg = solution.latitude_deg;
+    instance->snapshot.longitude_deg = solution.longitude_deg;
+    instance->snapshot.altitude_m = solution.altitude_m;
+    instance->snapshot.speed_knots = solution.speed_knots;
+    instance->snapshot.course_deg = solution.course_deg;
+    instance->snapshot.sigma_lat_m = solution.sigma_lat_m;
+    instance->snapshot.sigma_lon_m = solution.sigma_lon_m;
+    instance->snapshot.sigma_alt_m = solution.sigma_alt_m;
+    instance->snapshot.timestamp_ms += 10;
 }
 
 void gnss_um980_init(gnss_um980_t* instance, gnss_um980_role_t role, byte_ring_buffer_t* rx_buffer, byte_ring_buffer_t* tx_buffer)
@@ -40,24 +74,30 @@ size_t gnss_um980_feed_rx(gnss_um980_t* instance, const uint8_t* data, size_t le
 
 void gnss_um980_consume_rx(gnss_um980_t* instance)
 {
-    uint8_t temp[64];
-    size_t read_len = 0;
+    uint8_t byte = 0;
 
     if (instance == 0 || instance->rx_buffer == 0) {
         return;
     }
 
-    read_len = byte_ring_buffer_pop(instance->rx_buffer, temp, sizeof(temp));
-    if (read_len == 0) {
-        return;
-    }
+    while (byte_ring_buffer_pop(instance->rx_buffer, &byte, 1) == 1) {
+        instance->consumed_bytes++;
 
-    instance->consumed_bytes += (uint32_t)read_len;
-    instance->snapshot.valid = true;
-    instance->snapshot.latitude_deg = (instance->role == GNSS_UM980_PRIMARY) ? 50.0 : 50.0001;
-    instance->snapshot.longitude_deg = (instance->role == GNSS_UM980_PRIMARY) ? 8.0 : 8.0001;
-    instance->snapshot.altitude_m = 100.0f;
-    instance->snapshot.timestamp_ms += 10;
+        if (byte == '\n' || byte == '\r') {
+            if (instance->line_length > 0) {
+                instance->line_buffer[instance->line_length] = '\0';
+                gnss_um980_handle_nmea_line(instance, instance->line_buffer);
+                instance->line_length = 0;
+            }
+            continue;
+        }
+
+        if (instance->line_length + 1U < sizeof(instance->line_buffer)) {
+            instance->line_buffer[instance->line_length++] = (char)byte;
+        } else {
+            instance->line_length = 0;
+        }
+    }
 }
 
 bool gnss_um980_get_snapshot(const gnss_um980_t* instance, gnss_snapshot_t* out_snapshot)

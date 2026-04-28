@@ -20,9 +20,15 @@ typedef enum {
 
 typedef struct {
     bool valid;
+    bool has_fix;
     double latitude_deg;
     double longitude_deg;
     float altitude_m;
+    float speed_knots;
+    float course_deg;
+    float sigma_lat_m;
+    float sigma_lon_m;
+    float sigma_alt_m;
     uint64_t timestamp_ms;
 } gnss_snapshot_t;
 
@@ -33,6 +39,8 @@ typedef struct {
     byte_ring_buffer_t* tx_buffer;
     gnss_snapshot_t snapshot;
     uint32_t consumed_bytes;
+    char line_buffer[128];
+    size_t line_length;
     runtime_component_t component;
 } gnss_um980_t;
 

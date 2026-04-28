@@ -12,8 +12,16 @@
 extern "C" {
 #endif
 
+typedef enum {
+    AOG_FRAME_TYPE_DISCOVERY_REQUEST = 0x10,
+    AOG_FRAME_TYPE_DISCOVERY_RESPONSE = 0x11,
+    AOG_FRAME_TYPE_POSITION_HEADING = 0x20
+} aog_frame_type_t;
+
 typedef struct {
-    uint8_t data[64];
+    uint8_t type;
+    uint8_t seq;
+    uint8_t payload[48];
     uint16_t length;
 } aog_frame_t;
 
@@ -24,6 +32,7 @@ typedef struct {
     message_queue_t tx_queue;
     aog_frame_t rx_storage[8];
     aog_frame_t tx_storage[8];
+    uint8_t next_sequence;
     runtime_component_t component;
 } aog_navigation_app_t;
 

@@ -1,11 +1,8 @@
 #include "app_core.h"
 
-#include <string.h>
-
 #include "feature_flags.h"
 #include "runtime.h"
 #include "byte_ring_buffer.h"
-#include "message_queue.h"
 #include "gnss_um980.h"
 #include "gnss_dual_heading.h"
 #include "ntrip_client.h"
@@ -89,32 +86,7 @@ static void app_core_register_navigation_components(void)
         app_core_register_navigation_components();
     }
 
-    uint8_t rtcm_chunk[64];
-    aog_frame_t frame;
-
     runtime_start();
-
-    transport_uart_service_step(s_uart_channels, 2);
-    transport_udp_service_step(&s_transport_udp);
-    transport_tcp_service_step(&s_transport_tcp);
-    ntrip_client_service_step(&s_ntrip_client);
-
-    if (navigation_role_enabled()) {
-        size_t n = ntrip_client_pop_rtcm(&s_ntrip_client, rtcm_chunk, sizeof(rtcm_chunk));
-        if (n > 0U) {
-            rtcm_router_push_input(&s_rtcm_router, rtcm_chunk, n);
-        }
-
-        while (transport_udp_pop_rx(&s_transport_udp, &frame)) {
-            aog_navigation_app_feed_rx(&s_aog_navigation_app, &frame);
-        }
-
-        runtime_step_once();
-
-        while (aog_navigation_app_pop_tx(&s_aog_navigation_app, &frame)) {
-            transport_udp_push_tx(&s_transport_udp, &frame);
-        }
-    }
 {
     ESP_LOGI(TAG, "System init");
 }
