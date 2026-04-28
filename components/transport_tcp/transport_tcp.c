@@ -1,36 +1,91 @@
 #include "transport_tcp.h"
+#include <string.h>
 
-void transport_tcp_init(transport_tcp_t* transport)
+static transport_tcp_t* comp_to_tcp(runtime_component_t* comp)
 {
-    if (transport == 0) {
+    return (transport_tcp_t*)comp;
+}
+
+hal_err_t transport_tcp_init(transport_tcp_t* tcp, const transport_tcp_config_t* config)
+{
+    if (tcp == NULL || config == NULL) {
+        return HAL_ERR_INVALID_PARAM;
+    }
+
+    memset(tcp, 0, sizeof(transport_tcp_t));
+    tcp->remote_ip   = config->remote_ip;
+    tcp->remote_port = config->remote_port;
+    tcp->connected   = false;
+
+    byte_ring_buffer_init(&tcp->rx_buffer, tcp->rx_storage, sizeof(tcp->rx_storage));
+
+    /* Register service step callback */
+    tcp->component.service_step = transport_tcp_service_step;
+
+    return HAL_OK;
+}
+
+hal_err_t transport_tcp_deinit(transport_tcp_t* tcp)
+{
+    if (tcp == NULL) {
+        return HAL_ERR_INVALID_PARAM;
+    }
+    transport_tcp_disconnect(tcp);
+    memset(tcp, 0, sizeof(transport_tcp_t));
+    return HAL_OK;
+}
+
+hal_err_t transport_tcp_connect(transport_tcp_t* tcp)
+{
+    if (tcp == NULL) {
+        return HAL_ERR_INVALID_PARAM;
+    }
+    /* Stub: real implementation uses lwip tcp_connect */
+    tcp->connected = true;
+    return HAL_OK;
+}
+
+hal_err_t transport_tcp_disconnect(transport_tcp_t* tcp)
+{
+    if (tcp == NULL) {
+        return HAL_ERR_INVALID_PARAM;
+    }
+    tcp->connected = false;
+    return HAL_OK;
+}
+
+void transport_tcp_service_step(runtime_component_t* comp, uint64_t timestamp_us)
+{
+    (void)timestamp_us;
+    transport_tcp_t* tcp = comp_to_tcp(comp);
+    if (tcp == NULL || !tcp->connected) {
         return;
     }
 
-    byte_ring_buffer_init(&transport->rx_raw, transport->rx_storage, sizeof(transport->rx_storage));
-    byte_ring_buffer_init(&transport->tx_raw, transport->tx_storage, sizeof(transport->tx_storage));
+    /* RX: stub - real implementation uses lwip recv */
+    /* Data would go into rx_buffer here */
 }
 
-size_t transport_tcp_feed_rx_raw(transport_tcp_t* transport, const uint8_t* data, size_t length)
+size_t transport_tcp_rx_read(transport_tcp_t* tcp, uint8_t* buf, size_t max_len)
 {
-    return (transport != 0) ? byte_ring_buffer_push(&transport->rx_raw, data, length) : 0;
+    if (tcp == NULL || buf == NULL || max_len == 0) {
+        return 0;
+    }
+    return byte_ring_buffer_read(&tcp->rx_buffer, buf, max_len);
 }
 
-size_t transport_tcp_pop_rx_raw(transport_tcp_t* transport, uint8_t* out_data, size_t max_length)
+size_t transport_tcp_rx_available(const transport_tcp_t* tcp)
 {
-    return (transport != 0) ? byte_ring_buffer_pop(&transport->rx_raw, out_data, max_length) : 0;
+    if (tcp == NULL) {
+        return 0;
+    }
+    return byte_ring_buffer_available(&tcp->rx_buffer);
 }
 
-size_t transport_tcp_push_tx_raw(transport_tcp_t* transport, const uint8_t* data, size_t length)
+bool transport_tcp_is_connected(const transport_tcp_t* tcp)
 {
-    return (transport != 0) ? byte_ring_buffer_push(&transport->tx_raw, data, length) : 0;
-}
-
-size_t transport_tcp_drain_tx_raw(transport_tcp_t* transport, uint8_t* out_data, size_t max_length)
-{
-    return (transport != 0) ? byte_ring_buffer_pop(&transport->tx_raw, out_data, max_length) : 0;
-}
-
-void transport_tcp_service_step(transport_tcp_t* transport)
-{
-    (void)transport;
+    if (tcp == NULL) {
+        return false;
+    }
+    return tcp->connected;
 }

@@ -1,54 +1,82 @@
 #pragma once
 
+#include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
-
-#include "byte_ring_buffer.h"
 #include "runtime_component.h"
+#include "nmea_parser.h"
+#include "snapshot_buffer.h"
+#include "byte_ring_buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define UM980_DEFAULT_BAUDRATE 921600U
-
-typedef enum {
-    GNSS_UM980_PRIMARY = 0,
-    GNSS_UM980_SECONDARY
-} gnss_um980_role_t;
-
+/* ---- UM980 Receiver Instance ----
+ *
+ * Consumes raw NMEA bytes from an external RX source buffer.
+ * Parses NMEA sentences and maintains latest position data.
+ * Provides snapshots for downstream consumers (e.g., dual heading, AOG app).
+ *
+ * This component does NOT read UART or call HAL/Transport directly.
+ * It only consumes bytes via its feed API or rx_source buffer.
+ *
+ * IMPORTANT: runtime_component_t MUST be the first field for safe casting. */
 typedef struct {
-    bool valid;
-    bool has_fix;
-    double latitude_deg;
-    double longitude_deg;
-    float altitude_m;
-    float speed_knots;
-    float course_deg;
-    float sigma_lat_m;
-    float sigma_lon_m;
-    float sigma_alt_m;
-    uint64_t timestamp_ms;
-} gnss_snapshot_t;
+    runtime_component_t component;    /* MUST be first */
 
-typedef struct {
-    gnss_um980_role_t role;
-    uint32_t baud_rate;
-    byte_ring_buffer_t* rx_buffer;
-    byte_ring_buffer_t* tx_buffer;
-    gnss_snapshot_t snapshot;
-    uint32_t consumed_bytes;
-    char line_buffer[128];
-    size_t line_length;
-    runtime_component_t component;
+    /* Identity */
+    uint8_t     instance_id;    /* 0 = primary, 1 = secondary */
+    const char* name;
+
+    /* NMEA streaming parser */
+    nmea_parser_t nmea_parser;
+
+    /* RX data source (set by caller, NOT owned).
+     * Typically points to transport_uart.rx_buffer. */
+    byte_ring_buffer_t* rx_source;
+
+    /* Latest parsed data */
+    nmea_gga_t gga;
+    nmea_rmc_t rmc;
+    bool       gga_valid;
+    bool       rmc_valid;
+
+    /* Snapshot output for downstream consumers */
+    snapshot_buffer_t position_snapshot;   /* nmea_gga_t */
+    nmea_gga_t        position_storage;
+
+    /* Statistics */
+    uint32_t sentences_parsed;
+    uint32_t sentences_error;
+    uint32_t bytes_received;
 } gnss_um980_t;
 
-void gnss_um980_init(gnss_um980_t* instance, gnss_um980_role_t role, byte_ring_buffer_t* rx_buffer, byte_ring_buffer_t* tx_buffer);
-size_t gnss_um980_feed_rx(gnss_um980_t* instance, const uint8_t* data, size_t length);
-void gnss_um980_consume_rx(gnss_um980_t* instance);
-bool gnss_um980_get_snapshot(const gnss_um980_t* instance, gnss_snapshot_t* out_snapshot);
-runtime_component_t* gnss_um980_component(gnss_um980_t* instance);
+/* ---- API ---- */
+
+/* Initialize a UM980 instance. */
+void gnss_um980_init(gnss_um980_t* rx, uint8_t instance_id, const char* name);
+
+/* Set the RX source buffer (e.g., transport_uart.rx_buffer).
+ * The source is NOT owned by this component. */
+void gnss_um980_set_rx_source(gnss_um980_t* rx, byte_ring_buffer_t* source);
+
+/* Feed raw bytes into the receiver's NMEA parser (manual API).
+ * Returns number of complete sentences parsed. */
+uint32_t gnss_um980_feed(gnss_um980_t* rx, const uint8_t* data, size_t length);
+
+/* Service step: consume bytes from rx_source, parse NMEA.
+ * Called by the runtime service loop. */
+void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us);
+
+/* Get pointer to latest GGA data. NULL if not valid. */
+const nmea_gga_t* gnss_um980_get_gga(const gnss_um980_t* rx);
+
+/* Get pointer to latest RMC data. NULL if not valid. */
+const nmea_rmc_t* gnss_um980_get_rmc(const gnss_um980_t* rx);
+
+/* Check if position data is valid. */
+bool gnss_um980_has_fix(const gnss_um980_t* rx);
 
 #ifdef __cplusplus
 }

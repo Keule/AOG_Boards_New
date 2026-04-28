@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "protocol_rtcm.c"
+    SRCS "rtcm_passthrough.c"
     INCLUDE_DIRS "."
 )

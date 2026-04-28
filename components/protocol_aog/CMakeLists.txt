@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "protocol_aog.c"
+    SRCS "aog_frame.c" "aog_pgn.c"
     INCLUDE_DIRS "."
 )

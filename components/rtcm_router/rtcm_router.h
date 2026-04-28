@@ -1,37 +1,69 @@
 #pragma once
 
-#include <stddef.h>
 #include <stdint.h>
-
-#include "byte_ring_buffer.h"
+#include <stddef.h>
+#include <stdbool.h>
 #include "runtime_component.h"
+#include "rtcm_passthrough.h"
+#include "byte_ring_buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct {
-    uint32_t bytes_in;
-    uint32_t bytes_out;
-    uint32_t dropped_bytes;
-    uint32_t cycles;
-    uint32_t last_activity_cycle;
-} rtcm_router_stats_t;
+/* ---- RTCM Router Config ---- */
+
+#define RTCM_ROUTER_MAX_OUTPUTS  2
+
+/* ---- RTCM Router Output Target ---- */
 
 typedef struct {
-    byte_ring_buffer_t* output_buffers[4];
-    size_t output_count;
-    byte_ring_buffer_t* input_buffer;
-    rtcm_router_stats_t stats;
-    runtime_component_t component;
+    byte_ring_buffer_t* tx_buffer;   /* output ring buffer (NOT owned by router) */
+    bool                enabled;
+    uint32_t            bytes_forwarded;
+    uint32_t            bytes_dropped;
+} rtcm_output_t;
+
+/* ---- RTCM Router Instance ----
+ *
+ * Distributes RTCM data from a generic source buffer to registered output buffers.
+ * Does NOT own the source buffer (set by caller via pointer).
+ * Does NOT own the output buffers (set by caller via pointer).
+ * Does NOT call HAL, transport, or UART functions.
+ * Does NOT depend on ntrip_client or any specific data source type.
+ *
+ * IMPORTANT: runtime_component_t MUST be the first field for safe casting. */
+typedef struct {
+    runtime_component_t component;    /* MUST be first */
+
+    rtcm_passthrough_t passthrough;
+    byte_ring_buffer_t* rtcm_source;  /* generic RTCM input (NOT owned) */
+    rtcm_output_t      outputs[RTCM_ROUTER_MAX_OUTPUTS];
+    uint8_t            output_count;
 } rtcm_router_t;
 
-void rtcm_router_init(rtcm_router_t* router, byte_ring_buffer_t* input_buffer);
-int rtcm_router_register_output(rtcm_router_t* router, byte_ring_buffer_t* output_buffer);
-size_t rtcm_router_push_input(rtcm_router_t* router, const uint8_t* data, size_t length);
-void rtcm_router_step(rtcm_router_t* router);
-void rtcm_router_get_stats(const rtcm_router_t* router, rtcm_router_stats_t* out_stats);
-runtime_component_t* rtcm_router_component(rtcm_router_t* router);
+/* ---- API ---- */
+
+/* Initialize RTCM router. */
+void rtcm_router_init(rtcm_router_t* router);
+
+/* Register an output ring buffer target.
+ * tx_buffer: pointer to an externally owned byte_ring_buffer_t.
+ * The router writes RTCM data into this buffer; the owner drains it.
+ * Returns output index or negative error. */
+int rtcm_router_add_output(rtcm_router_t* router, byte_ring_buffer_t* tx_buffer);
+
+/* Set the generic RTCM data source.
+ * The source is NOT owned by the router.
+ * Typically points to ntrip_client.rtcm_buffer or any other RTCM byte source. */
+void rtcm_router_set_source(rtcm_router_t* router, byte_ring_buffer_t* source);
+
+/* Service step: pull RTCM data from source, distribute to outputs.
+ * Called by the runtime service loop. */
+void rtcm_router_service_step(runtime_component_t* comp, uint64_t timestamp_us);
+
+/* Get RTCM statistics. */
+const rtcm_stats_t* rtcm_router_get_stats(const rtcm_router_t* router);
 
 #ifdef __cplusplus
 }

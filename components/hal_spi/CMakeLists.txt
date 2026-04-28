@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "hal_spi.c" "hal_spi_backend_esp32.c" "hal_spi_backend_sim.c"
+    SRCS "hal_spi.c"
     INCLUDE_DIRS "."
-    REQUIRES hal_backend
+    REQUIRES hal_backend board_profiles
 )

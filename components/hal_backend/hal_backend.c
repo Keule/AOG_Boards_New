@@ -1,10 +1,13 @@
 #include "hal_backend.h"
 
-hal_backend_kind_t hal_backend_get_kind(void)
+static hal_backend_type_t s_backend = HAL_BACKEND_NONE;
+
+void hal_backend_set(hal_backend_type_t backend)
 {
-#if defined(HAL_BACKEND_SIM)
-    return HAL_BACKEND_SIM;
-#else
-    return HAL_BACKEND_ESP32;
-#endif
+    s_backend = backend;
+}
+
+hal_backend_type_t hal_backend_get(void)
+{
+    return s_backend;
 }

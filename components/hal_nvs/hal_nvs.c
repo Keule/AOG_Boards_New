@@ -1,31 +1,79 @@
 #include "hal_nvs.h"
 
-#include "hal_backend.h"
-#include "hal_nvs_backend.h"
+static const hal_nvs_ops_t* s_nvs_ops = NULL;
 
-int hal_nvs_init(void)
+hal_err_t hal_nvs_init(const hal_nvs_ops_t* ops)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_nvs_backend_sim_init();
+    if (ops == NULL) {
+        return HAL_ERR_INVALID_PARAM;
     }
-
-    return hal_nvs_backend_esp32_init();
+    s_nvs_ops = ops;
+    return HAL_OK;
 }
 
-int hal_nvs_set_blob(const char* key, const void* data, size_t size)
+hal_err_t hal_nvs_deinit(void)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_nvs_backend_sim_set_blob(key, data, size);
-    }
-
-    return hal_nvs_backend_esp32_set_blob(key, data, size);
+    s_nvs_ops = NULL;
+    return HAL_OK;
 }
 
-int hal_nvs_get_blob(const char* key, void* out_data, size_t* inout_size)
+hal_err_t hal_nvs_get(const char* key, void* out, size_t max_len, size_t* out_len)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_nvs_backend_sim_get_blob(key, out_data, inout_size);
+    if (s_nvs_ops == NULL || s_nvs_ops->get == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
     }
+    return s_nvs_ops->get(key, out, max_len, out_len);
+}
 
-    return hal_nvs_backend_esp32_get_blob(key, out_data, inout_size);
+hal_err_t hal_nvs_set(const char* key, const void* value, size_t len)
+{
+    if (s_nvs_ops == NULL || s_nvs_ops->set == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
+    }
+    return s_nvs_ops->set(key, value, len);
+}
+
+hal_err_t hal_nvs_erase(const char* key)
+{
+    if (s_nvs_ops == NULL || s_nvs_ops->erase == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
+    }
+    return s_nvs_ops->erase(key);
+}
+
+/* ---- ESP32 Stub Implementations ---- */
+
+static hal_err_t esp32_nvs_init(void)  { return HAL_OK; }
+static hal_err_t esp32_nvs_deinit(void) { return HAL_OK; }
+
+static hal_err_t esp32_nvs_get(const char* key, void* out, size_t max_len, size_t* out_len)
+{
+    (void)key; (void)out; (void)max_len;
+    if (out_len != NULL) { *out_len = 0; }
+    return HAL_OK;
+}
+
+static hal_err_t esp32_nvs_set(const char* key, const void* value, size_t len)
+{
+    (void)key; (void)value; (void)len;
+    return HAL_OK;
+}
+
+static hal_err_t esp32_nvs_erase(const char* key)
+{
+    (void)key;
+    return HAL_OK;
+}
+
+static const hal_nvs_ops_t s_esp32_nvs_ops = {
+    .init  = esp32_nvs_init,
+    .deinit = esp32_nvs_deinit,
+    .get   = esp32_nvs_get,
+    .set   = esp32_nvs_set,
+    .erase = esp32_nvs_erase,
+};
+
+const hal_nvs_ops_t* hal_nvs_esp32_ops(void)
+{
+    return &s_esp32_nvs_ops;
 }

@@ -1,40 +1,91 @@
 #include "hal_uart.h"
 
-#include "hal_backend.h"
-#include "hal_uart_backend.h"
+static const hal_uart_ops_t* s_uart_ops = NULL;
 
-int hal_uart_init(hal_uart_t* uart, const hal_uart_config_t* config)
+hal_err_t hal_uart_init(const hal_uart_ops_t* ops)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_uart_backend_sim_init(uart, config);
+    if (ops == NULL) {
+        return HAL_ERR_INVALID_PARAM;
     }
-
-    return hal_uart_backend_esp32_init(uart, config);
+    s_uart_ops = ops;
+    return HAL_OK;
 }
 
-int hal_uart_deinit(hal_uart_t* uart)
+hal_err_t hal_uart_deinit(void)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_uart_backend_sim_deinit(uart);
-    }
-
-    return hal_uart_backend_esp32_deinit(uart);
+    s_uart_ops = NULL;
+    return HAL_OK;
 }
 
-int hal_uart_write_nonblocking(hal_uart_t* uart, const uint8_t* data, size_t length, size_t* written)
+hal_err_t hal_uart_port_init(board_uart_port_t port, const hal_uart_config_t* config)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_uart_backend_sim_write_nonblocking(uart, data, length, written);
+    if (s_uart_ops == NULL || s_uart_ops->init == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
     }
-
-    return hal_uart_backend_esp32_write_nonblocking(uart, data, length, written);
+    if (!board_profile_has_uart(port)) {
+        return HAL_ERR_NOT_SUPPORTED;
+    }
+    return s_uart_ops->init(port, config);
 }
 
-int hal_uart_read_nonblocking(hal_uart_t* uart, uint8_t* out_data, size_t max_length, size_t* read_count)
+hal_err_t hal_uart_port_deinit(board_uart_port_t port)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_uart_backend_sim_read_nonblocking(uart, out_data, max_length, read_count);
+    if (s_uart_ops == NULL || s_uart_ops->deinit == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
     }
+    return s_uart_ops->deinit(port);
+}
 
-    return hal_uart_backend_esp32_read_nonblocking(uart, out_data, max_length, read_count);
+int hal_uart_read(board_uart_port_t port, uint8_t* buf, size_t max_len)
+{
+    if (s_uart_ops == NULL || s_uart_ops->read == NULL) {
+        return 0;
+    }
+    return s_uart_ops->read(port, buf, max_len);
+}
+
+int hal_uart_write(board_uart_port_t port, const uint8_t* buf, size_t len)
+{
+    if (s_uart_ops == NULL || s_uart_ops->write == NULL) {
+        return 0;
+    }
+    return s_uart_ops->write(port, buf, len);
+}
+
+/* ---- ESP32 Stub Implementations ---- */
+
+static hal_err_t esp32_uart_init(board_uart_port_t port, const hal_uart_config_t* config)
+{
+    (void)port; (void)config;
+    return HAL_OK;
+}
+
+static hal_err_t esp32_uart_deinit(board_uart_port_t port)
+{
+    (void)port;
+    return HAL_OK;
+}
+
+static int esp32_uart_read(board_uart_port_t port, uint8_t* buf, size_t max_len)
+{
+    (void)port; (void)buf; (void)max_len;
+    return 0;
+}
+
+static int esp32_uart_write(board_uart_port_t port, const uint8_t* buf, size_t len)
+{
+    (void)port; (void)buf; (void)len;
+    return 0;
+}
+
+static const hal_uart_ops_t s_esp32_uart_ops = {
+    .init   = esp32_uart_init,
+    .deinit = esp32_uart_deinit,
+    .read   = esp32_uart_read,
+    .write  = esp32_uart_write,
+};
+
+const hal_uart_ops_t* hal_uart_esp32_ops(void)
+{
+    return &s_esp32_uart_ops;
 }

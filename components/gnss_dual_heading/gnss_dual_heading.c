@@ -1,61 +1,97 @@
 #include "gnss_dual_heading.h"
-
+#include "gnss_um980.h"
+#include <math.h>
 #include <string.h>
 
-static void gnss_dual_heading_component_step(runtime_component_t* component)
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+void gnss_dual_heading_init(gnss_dual_heading_calc_t* calc)
 {
-    gnss_dual_heading_t* instance = 0;
-    if (component == 0) {
+    if (calc == NULL) {
+        return;
+    }
+    memset(calc, 0, sizeof(gnss_dual_heading_calc_t));
+    snapshot_buffer_init(&calc->heading_snapshot,
+                        &calc->heading_storage,
+                        sizeof(gnss_dual_heading_t));
+    calc->component.service_step = gnss_dual_heading_service_step;
+}
+
+void gnss_dual_heading_set_sources(gnss_dual_heading_calc_t* calc,
+                                    gnss_um980_t* primary,
+                                    gnss_um980_t* secondary)
+{
+    if (calc == NULL) {
+        return;
+    }
+    calc->primary = primary;
+    calc->secondary = secondary;
+}
+
+void gnss_dual_heading_service_step(runtime_component_t* comp, uint64_t timestamp_us)
+{
+    (void)timestamp_us;
+    gnss_dual_heading_calc_t* calc = (gnss_dual_heading_calc_t*)comp;
+    if (calc == NULL || calc->primary == NULL || calc->secondary == NULL) {
         return;
     }
 
-    instance = (gnss_dual_heading_t*)component->user_data;
-    gnss_dual_heading_step(instance);
-}
+    const nmea_gga_t* primary_gga = gnss_um980_get_gga(calc->primary);
+    const nmea_gga_t* secondary_gga = gnss_um980_get_gga(calc->secondary);
 
-void gnss_dual_heading_init(gnss_dual_heading_t* instance, const gnss_um980_t* primary, const gnss_um980_t* secondary)
-{
-    if (instance == 0) {
+    if (primary_gga == NULL || secondary_gga == NULL) {
+        calc->result.valid = false;
         return;
     }
 
-    memset(instance, 0, sizeof(*instance));
-    instance->primary = primary;
-    instance->secondary = secondary;
-    instance->component.name = "gnss_dual_heading";
-    instance->component.user_data = instance;
-    instance->component.step = gnss_dual_heading_component_step;
-}
+    calc->result.primary_fix = primary_gga->fix_quality;
+    calc->result.secondary_fix = secondary_gga->fix_quality;
 
-void gnss_dual_heading_step(gnss_dual_heading_t* instance)
-{
-    gnss_snapshot_t p;
-    gnss_snapshot_t s;
-
-    if (instance == 0) {
+    /* Both receivers must have a fix */
+    if (primary_gga->fix_quality == 0 || secondary_gga->fix_quality == 0) {
+        calc->result.valid = false;
         return;
     }
 
-    if (!gnss_um980_get_snapshot(instance->primary, &p) || !gnss_um980_get_snapshot(instance->secondary, &s)) {
+    /* Calculate heading from two positions using atan2 */
+    double dlat = secondary_gga->latitude - primary_gga->latitude;
+    double dlon = secondary_gga->longitude - primary_gga->longitude;
+
+    if (dlat == 0.0 && dlon == 0.0) {
+        calc->result.valid = false;
         return;
     }
 
-    instance->snapshot.valid = true;
-    instance->snapshot.heading_deg = (s.longitude_deg >= p.longitude_deg) ? 90.0f : 270.0f;
-    instance->snapshot.timestamp_ms = (p.timestamp_ms > s.timestamp_ms) ? p.timestamp_ms : s.timestamp_ms;
-}
+    double lat_rad = primary_gga->latitude * M_PI / 180.0;
+    double east  = dlon * cos(lat_rad);
+    double north = dlat;
 
-bool gnss_dual_heading_get_snapshot(const gnss_dual_heading_t* instance, heading_snapshot_t* out_snapshot)
-{
-    if (instance == 0 || out_snapshot == 0 || !instance->snapshot.valid) {
-        return false;
+    calc->result.heading_rad = atan2(east, north);
+    if (calc->result.heading_rad < 0.0) {
+        calc->result.heading_rad += 2.0 * M_PI;
     }
 
-    *out_snapshot = instance->snapshot;
-    return true;
+    calc->result.valid = true;
+    calc->calc_count++;
+
+    /* Publish to snapshot buffer for downstream consumers */
+    snapshot_buffer_set(&calc->heading_snapshot, &calc->result);
 }
 
-runtime_component_t* gnss_dual_heading_component(gnss_dual_heading_t* instance)
+const gnss_dual_heading_t* gnss_dual_heading_get(const gnss_dual_heading_calc_t* calc)
 {
-    return (instance != 0) ? &instance->component : 0;
+    if (calc == NULL) {
+        return NULL;
+    }
+    return &calc->result;
+}
+
+const snapshot_buffer_t* gnss_dual_heading_get_snapshot(const gnss_dual_heading_calc_t* calc)
+{
+    if (calc == NULL) {
+        return NULL;
+    }
+    return &calc->heading_snapshot;
 }

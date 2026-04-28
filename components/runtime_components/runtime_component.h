@@ -1,19 +1,42 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include "runtime_types.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct runtime_component runtime_component_t;
-typedef void (*runtime_component_step_fn)(runtime_component_t* component);
+
+typedef void (*runtime_component_fast_fn_t)(
+    runtime_component_t* component,
+    const fast_cycle_context_t* ctx
+);
+
+/* Service step callback: called from the service task (NOT from task_fast).
+ * timestamp_us: current timestamp in microseconds, provided by the runtime.
+ * Components may perform buffered I/O, state machine steps, and
+ * inter-component data exchange here. No strict real-time guarantees. */
+typedef void (*runtime_component_service_fn_t)(
+    runtime_component_t* component,
+    uint64_t timestamp_us
+);
 
 struct runtime_component {
     const char* name;
     void* user_data;
-    runtime_component_step_fn step;
+    runtime_component_fast_fn_t fast_input;
+    runtime_component_fast_fn_t fast_process;
+    runtime_component_fast_fn_t fast_output;
+    runtime_component_service_fn_t service_step;
 };
 
-void runtime_component_step(runtime_component_t* component);
+int runtime_component_register(runtime_component_t* component);
+size_t runtime_component_count(void);
+runtime_component_t* runtime_component_get(size_t index);
 
 #ifdef __cplusplus
 }

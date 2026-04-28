@@ -1,31 +1,63 @@
 #include "hal_gpio.h"
 
-#include "hal_backend.h"
-#include "hal_gpio_backend.h"
+static const hal_gpio_ops_t* s_gpio_ops = NULL;
 
-int hal_gpio_init(uint32_t pin, hal_gpio_direction_t direction)
+hal_err_t hal_gpio_init(const hal_gpio_ops_t* ops)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_gpio_backend_sim_init(pin, direction);
+    if (ops == NULL) {
+        return HAL_ERR_INVALID_PARAM;
     }
-
-    return hal_gpio_backend_esp32_init(pin, direction);
+    s_gpio_ops = ops;
+    return HAL_OK;
 }
 
-int hal_gpio_write(uint32_t pin, bool level)
+hal_err_t hal_gpio_deinit(void)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_gpio_backend_sim_write(pin, level);
-    }
-
-    return hal_gpio_backend_esp32_write(pin, level);
+    s_gpio_ops = NULL;
+    return HAL_OK;
 }
 
-int hal_gpio_read(uint32_t pin, bool* level)
+hal_err_t hal_gpio_set_mode(uint8_t pin, hal_gpio_mode_t mode)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_gpio_backend_sim_read(pin, level);
+    if (s_gpio_ops == NULL || s_gpio_ops->set_mode == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
     }
+    return s_gpio_ops->set_mode(pin, mode);
+}
 
-    return hal_gpio_backend_esp32_read(pin, level);
+hal_err_t hal_gpio_set(uint8_t pin, hal_gpio_level_t level)
+{
+    if (s_gpio_ops == NULL || s_gpio_ops->set == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
+    }
+    return s_gpio_ops->set(pin, level);
+}
+
+hal_gpio_level_t hal_gpio_get(uint8_t pin)
+{
+    if (s_gpio_ops == NULL || s_gpio_ops->get == NULL) {
+        return HAL_GPIO_LOW;
+    }
+    return s_gpio_ops->get(pin);
+}
+
+/* ---- ESP32 Stub Implementations ---- */
+
+static hal_err_t esp32_gpio_init(void)    { return HAL_OK; }
+static hal_err_t esp32_gpio_deinit(void)  { return HAL_OK; }
+static hal_err_t esp32_gpio_set_mode(uint8_t pin, hal_gpio_mode_t mode) { (void)pin; (void)mode; return HAL_OK; }
+static hal_err_t esp32_gpio_set(uint8_t pin, hal_gpio_level_t level)      { (void)pin; (void)level; return HAL_OK; }
+static hal_gpio_level_t esp32_gpio_get(uint8_t pin)                       { (void)pin; return HAL_GPIO_LOW; }
+
+static const hal_gpio_ops_t s_esp32_gpio_ops = {
+    .init     = esp32_gpio_init,
+    .deinit   = esp32_gpio_deinit,
+    .set_mode = esp32_gpio_set_mode,
+    .set      = esp32_gpio_set,
+    .get      = esp32_gpio_get,
+};
+
+const hal_gpio_ops_t* hal_gpio_esp32_ops(void)
+{
+    return &s_esp32_gpio_ops;
 }

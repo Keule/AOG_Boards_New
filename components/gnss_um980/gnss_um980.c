@@ -1,120 +1,111 @@
 #include "gnss_um980.h"
-
 #include <string.h>
 
-#include "protocol_nmea.h"
-
-static void gnss_um980_component_step(runtime_component_t* component)
+void gnss_um980_init(gnss_um980_t* rx, uint8_t instance_id, const char* name)
 {
-    gnss_um980_t* instance = 0;
-    if (component == 0) {
+    if (rx == NULL) {
         return;
     }
 
-    instance = (gnss_um980_t*)component->user_data;
-    gnss_um980_consume_rx(instance);
+    memset(rx, 0, sizeof(gnss_um980_t));
+    rx->instance_id = instance_id;
+    rx->name = name;
+
+    nmea_parser_init(&rx->nmea_parser);
+    snapshot_buffer_init(&rx->position_snapshot, &rx->position_storage, sizeof(nmea_gga_t));
+
+    /* Register service step callback */
+    rx->component.service_step = gnss_um980_service_step;
 }
 
-static void gnss_um980_handle_nmea_line(gnss_um980_t* instance, const char* line)
+void gnss_um980_set_rx_source(gnss_um980_t* rx, byte_ring_buffer_t* source)
 {
-    nmea_solution_t solution;
-
-    memset(&solution, 0, sizeof(solution));
-    solution.has_fix = instance->snapshot.has_fix;
-    solution.latitude_deg = instance->snapshot.latitude_deg;
-    solution.longitude_deg = instance->snapshot.longitude_deg;
-    solution.altitude_m = instance->snapshot.altitude_m;
-    solution.speed_knots = instance->snapshot.speed_knots;
-    solution.course_deg = instance->snapshot.course_deg;
-    solution.sigma_lat_m = instance->snapshot.sigma_lat_m;
-    solution.sigma_lon_m = instance->snapshot.sigma_lon_m;
-    solution.sigma_alt_m = instance->snapshot.sigma_alt_m;
-
-    if (!protocol_nmea_parse_line(line, &solution)) {
+    if (rx == NULL) {
         return;
     }
-
-    instance->snapshot.valid = true;
-    instance->snapshot.has_fix = solution.has_fix;
-    instance->snapshot.latitude_deg = solution.latitude_deg;
-    instance->snapshot.longitude_deg = solution.longitude_deg;
-    instance->snapshot.altitude_m = solution.altitude_m;
-    instance->snapshot.speed_knots = solution.speed_knots;
-    instance->snapshot.course_deg = solution.course_deg;
-    instance->snapshot.sigma_lat_m = solution.sigma_lat_m;
-    instance->snapshot.sigma_lon_m = solution.sigma_lon_m;
-    instance->snapshot.sigma_alt_m = solution.sigma_alt_m;
-    instance->snapshot.timestamp_ms += 10;
+    rx->rx_source = source;
 }
 
-void gnss_um980_init(gnss_um980_t* instance, gnss_um980_role_t role, byte_ring_buffer_t* rx_buffer, byte_ring_buffer_t* tx_buffer)
+uint32_t gnss_um980_feed(gnss_um980_t* rx, const uint8_t* data, size_t length)
 {
-    if (instance == 0) {
-        return;
-    }
-
-    memset(instance, 0, sizeof(*instance));
-    instance->role = role;
-    instance->baud_rate = UM980_DEFAULT_BAUDRATE;
-    instance->rx_buffer = rx_buffer;
-    instance->tx_buffer = tx_buffer;
-    instance->component.name = (role == GNSS_UM980_PRIMARY) ? "gnss_um980_primary" : "gnss_um980_secondary";
-    instance->component.user_data = instance;
-    instance->component.step = gnss_um980_component_step;
-}
-
-size_t gnss_um980_feed_rx(gnss_um980_t* instance, const uint8_t* data, size_t length)
-{
-    if (instance == 0 || instance->rx_buffer == 0) {
+    if (rx == NULL || data == NULL || length == 0) {
         return 0;
     }
 
-    return byte_ring_buffer_push(instance->rx_buffer, data, length);
+    uint32_t sentences_parsed = 0;
+    rx->bytes_received += (uint32_t)length;
+
+    for (size_t i = 0; i < length; i++) {
+        nmea_result_t result = nmea_parser_feed(&rx->nmea_parser, data[i]);
+
+        if (result == NMEA_RESULT_VALID) {
+            sentences_parsed++;
+
+            switch (rx->nmea_parser.type) {
+            case NMEA_SENTENCE_GGA:
+                rx->gga = rx->nmea_parser.data.gga;
+                rx->gga_valid = true;
+                snapshot_buffer_set(&rx->position_snapshot, &rx->gga);
+                break;
+            case NMEA_SENTENCE_RMC:
+                rx->rmc = rx->nmea_parser.data.rmc;
+                rx->rmc_valid = true;
+                break;
+            default:
+                /* GSV, GSA, GST: parsed but not individually stored in v1 */
+                break;
+            }
+        } else if (result == NMEA_RESULT_INVALID_CHECKSUM) {
+            rx->sentences_error++;
+        }
+    }
+
+    rx->sentences_parsed += sentences_parsed;
+    return sentences_parsed;
 }
 
-void gnss_um980_consume_rx(gnss_um980_t* instance)
+void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us)
 {
-    uint8_t byte = 0;
-
-    if (instance == 0 || instance->rx_buffer == 0) {
+    (void)timestamp_us;
+    gnss_um980_t* rx = (gnss_um980_t*)comp;
+    if (rx == NULL || rx->rx_source == NULL) {
         return;
     }
 
-    while (byte_ring_buffer_pop(instance->rx_buffer, &byte, 1) == 1) {
-        instance->consumed_bytes++;
+    /* Consume bytes from RX source buffer */
+    uint8_t tmp[64];
+    size_t available = byte_ring_buffer_available(rx->rx_source);
+    if (available == 0) {
+        return;
+    }
 
-        if (byte == '\n' || byte == '\r') {
-            if (instance->line_length > 0) {
-                instance->line_buffer[instance->line_length] = '\0';
-                gnss_um980_handle_nmea_line(instance, instance->line_buffer);
-                instance->line_length = 0;
-            }
-            continue;
-        }
-
-        if (instance->line_length + 1U < sizeof(instance->line_buffer)) {
-            instance->line_buffer[instance->line_length++] = (char)byte;
-        } else {
-            instance->line_length = 0;
-        }
+    size_t to_read = available > sizeof(tmp) ? sizeof(tmp) : available;
+    size_t pulled = byte_ring_buffer_read(rx->rx_source, tmp, to_read);
+    if (pulled > 0) {
+        gnss_um980_feed(rx, tmp, pulled);
     }
 }
 
-bool gnss_um980_get_snapshot(const gnss_um980_t* instance, gnss_snapshot_t* out_snapshot)
+const nmea_gga_t* gnss_um980_get_gga(const gnss_um980_t* rx)
 {
-    if (instance == 0 || out_snapshot == 0 || !instance->snapshot.valid) {
+    if (rx == NULL || !rx->gga_valid) {
+        return NULL;
+    }
+    return &rx->gga;
+}
+
+const nmea_rmc_t* gnss_um980_get_rmc(const gnss_um980_t* rx)
+{
+    if (rx == NULL || !rx->rmc_valid) {
+        return NULL;
+    }
+    return &rx->rmc;
+}
+
+bool gnss_um980_has_fix(const gnss_um980_t* rx)
+{
+    if (rx == NULL || !rx->gga_valid) {
         return false;
     }
-
-    *out_snapshot = instance->snapshot;
-    return true;
-}
-
-runtime_component_t* gnss_um980_component(gnss_um980_t* instance)
-{
-    if (instance == 0) {
-        return 0;
-    }
-
-    return &instance->component;
+    return rx->gga.fix_quality > 0;
 }

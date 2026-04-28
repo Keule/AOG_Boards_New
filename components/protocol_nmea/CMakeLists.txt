@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "protocol_nmea.c"
+    SRCS "nmea_parser.c"
     INCLUDE_DIRS "."
 )

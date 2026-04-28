@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "transport_tcp.c"
     INCLUDE_DIRS "."
-    REQUIRES runtime_buffers
+    REQUIRES hal_backend runtime_buffers runtime_components
 )

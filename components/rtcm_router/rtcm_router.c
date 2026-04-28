@@ -1,94 +1,95 @@
 #include "rtcm_router.h"
-
 #include <string.h>
 
-static void rtcm_router_component_step(runtime_component_t* component)
+void rtcm_router_init(rtcm_router_t* router)
 {
-    rtcm_router_t* router = 0;
-    if (component == 0) {
+    if (router == NULL) {
         return;
     }
-
-    router = (rtcm_router_t*)component->user_data;
-    rtcm_router_step(router);
+    memset(router, 0, sizeof(rtcm_router_t));
+    rtcm_passthrough_init(&router->passthrough);
+    router->component.service_step = rtcm_router_service_step;
 }
 
-void rtcm_router_init(rtcm_router_t* router, byte_ring_buffer_t* input_buffer)
+int rtcm_router_add_output(rtcm_router_t* router, byte_ring_buffer_t* tx_buffer)
 {
-    if (router == 0) {
-        return;
-    }
-
-    memset(&router->stats, 0, sizeof(router->stats));
-    router->output_count = 0;
-    router->input_buffer = input_buffer;
-    router->component.name = "rtcm_router";
-    router->component.user_data = router;
-    router->component.step = rtcm_router_component_step;
-}
-
-int rtcm_router_register_output(rtcm_router_t* router, byte_ring_buffer_t* output_buffer)
-{
-    if (router == 0 || output_buffer == 0 || router->output_count >= 4) {
+    if (router == NULL || tx_buffer == NULL) {
         return -1;
     }
-
-    router->output_buffers[router->output_count++] = output_buffer;
-    return 0;
-}
-
-size_t rtcm_router_push_input(rtcm_router_t* router, const uint8_t* data, size_t length)
-{
-    size_t pushed = 0;
-
-    if (router == 0 || router->input_buffer == 0 || data == 0) {
-        return 0;
+    if (router->output_count >= RTCM_ROUTER_MAX_OUTPUTS) {
+        return -2;
     }
 
-    pushed = byte_ring_buffer_push(router->input_buffer, data, length);
-    router->stats.bytes_in += (uint32_t)pushed;
-    router->stats.dropped_bytes += (uint32_t)(length - pushed);
-    if (pushed > 0) {
-        router->stats.last_activity_cycle = router->stats.cycles;
-    }
-    return pushed;
+    rtcm_output_t* out = &router->outputs[router->output_count];
+    out->tx_buffer = tx_buffer;
+    out->enabled = true;
+    out->bytes_forwarded = 0;
+    out->bytes_dropped = 0;
+
+    return (int)router->output_count++;
 }
 
-void rtcm_router_step(rtcm_router_t* router)
+void rtcm_router_set_source(rtcm_router_t* router, byte_ring_buffer_t* source)
 {
-    uint8_t chunk[64];
-    size_t i = 0;
-    size_t n = 0;
+    if (router == NULL) {
+        return;
+    }
+    router->rtcm_source = source;
+}
 
-    if (router == 0 || router->input_buffer == 0) {
+void rtcm_router_service_step(runtime_component_t* comp, uint64_t timestamp_us)
+{
+    rtcm_router_t* router = (rtcm_router_t*)comp;
+    if (router == NULL) {
         return;
     }
 
-    router->stats.cycles++;
-
-    n = byte_ring_buffer_pop(router->input_buffer, chunk, sizeof(chunk));
-    if (n == 0) {
+    if (router->rtcm_source == NULL) {
         return;
     }
 
-    for (i = 0; i < router->output_count; ++i) {
-        size_t pushed = byte_ring_buffer_push(router->output_buffers[i], chunk, n);
-        router->stats.bytes_out += (uint32_t)pushed;
-        router->stats.dropped_bytes += (uint32_t)(n - pushed);
-    }
-    router->stats.last_activity_cycle = router->stats.cycles;
-}
-
-void rtcm_router_get_stats(const rtcm_router_t* router, rtcm_router_stats_t* out_stats)
-{
-    if (router == 0 || out_stats == 0) {
+    /* Check if RTCM data is available from source */
+    size_t available = byte_ring_buffer_available(router->rtcm_source);
+    if (available == 0) {
         return;
     }
 
-    *out_stats = router->stats;
+    /* Read RTCM data from source into local buffer */
+    uint8_t tmp[128];
+    size_t to_read = available > sizeof(tmp) ? sizeof(tmp) : available;
+    size_t pulled = byte_ring_buffer_read(router->rtcm_source, tmp, to_read);
+    if (pulled == 0) {
+        return;
+    }
+
+    /* Record incoming RTCM bytes */
+    rtcm_passthrough_record_in(&router->passthrough, pulled, timestamp_us);
+
+    /* Distribute to all registered output buffers */
+    for (uint8_t i = 0; i < router->output_count; i++) {
+        rtcm_output_t* out = &router->outputs[i];
+        if (!out->enabled || out->tx_buffer == NULL) {
+            continue;
+        }
+
+        size_t written = byte_ring_buffer_write(out->tx_buffer, tmp, pulled);
+        if (written > 0) {
+            out->bytes_forwarded += (uint32_t)written;
+            rtcm_passthrough_record_out(&router->passthrough, written);
+        }
+
+        if (written < pulled) {
+            uint32_t dropped = (uint32_t)(pulled - written);
+            out->bytes_dropped += dropped;
+            rtcm_passthrough_record_dropped(&router->passthrough, dropped);
+        }
+    }
 }
 
-runtime_component_t* rtcm_router_component(rtcm_router_t* router)
+const rtcm_stats_t* rtcm_router_get_stats(const rtcm_router_t* router)
 {
-    return (router != 0) ? &router->component : 0;
+    if (router == NULL) {
+        return NULL;
+    }
+    return rtcm_passthrough_get_stats(&router->passthrough);
 }

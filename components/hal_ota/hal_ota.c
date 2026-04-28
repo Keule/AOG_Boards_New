@@ -1,40 +1,63 @@
 #include "hal_ota.h"
 
-#include "hal_backend.h"
-#include "hal_ota_backend.h"
+static const hal_ota_ops_t* s_ota_ops = NULL;
 
-int hal_ota_begin(size_t image_size)
+hal_err_t hal_ota_init(const hal_ota_ops_t* ops)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_ota_backend_sim_begin(image_size);
+    if (ops == NULL) {
+        return HAL_ERR_INVALID_PARAM;
     }
-
-    return hal_ota_backend_esp32_begin(image_size);
+    s_ota_ops = ops;
+    return HAL_OK;
 }
 
-int hal_ota_write(const uint8_t* data, size_t size)
+hal_err_t hal_ota_begin(size_t image_size)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_ota_backend_sim_write(data, size);
+    if (s_ota_ops == NULL || s_ota_ops->begin == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
     }
-
-    return hal_ota_backend_esp32_write(data, size);
+    return s_ota_ops->begin(image_size);
 }
 
-int hal_ota_end(void)
+hal_err_t hal_ota_write(const uint8_t* data, size_t len)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_ota_backend_sim_end();
+    if (s_ota_ops == NULL || s_ota_ops->write == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
     }
-
-    return hal_ota_backend_esp32_end();
+    return s_ota_ops->write(data, len);
 }
 
-int hal_ota_reboot(void)
+hal_err_t hal_ota_end(void)
 {
-    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
-        return hal_ota_backend_sim_reboot();
+    if (s_ota_ops == NULL || s_ota_ops->end == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
     }
+    return s_ota_ops->end();
+}
 
-    return hal_ota_backend_esp32_reboot();
+hal_err_t hal_ota_reboot(void)
+{
+    if (s_ota_ops == NULL || s_ota_ops->reboot == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
+    }
+    return s_ota_ops->reboot();
+}
+
+/* ---- ESP32 Stub Implementations ---- */
+
+static hal_err_t esp32_ota_begin(size_t image_size)  { (void)image_size; return HAL_OK; }
+static hal_err_t esp32_ota_write(const uint8_t* data, size_t len) { (void)data; (void)len; return HAL_OK; }
+static hal_err_t esp32_ota_end(void)                 { return HAL_OK; }
+static hal_err_t esp32_ota_reboot(void)              { return HAL_OK; }
+
+static const hal_ota_ops_t s_esp32_ota_ops = {
+    .begin  = esp32_ota_begin,
+    .write  = esp32_ota_write,
+    .end    = esp32_ota_end,
+    .reboot = esp32_ota_reboot,
+};
+
+const hal_ota_ops_t* hal_ota_esp32_ops(void)
+{
+    return &s_esp32_ota_ops;
 }
