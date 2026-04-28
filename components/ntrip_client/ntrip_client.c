@@ -51,10 +51,32 @@ void ntrip_client_init(ntrip_client_t* client)
     }
     memset(client, 0, sizeof(ntrip_client_t));
     client->state = NTRIP_STATE_IDLE;
+    client->started = false;
     byte_ring_buffer_init(&client->rtcm_buffer,
                           client->rtcm_storage,
                           sizeof(client->rtcm_storage));
     client->component.service_step = ntrip_client_service_step;
+}
+
+bool ntrip_client_start(ntrip_client_t* client)
+{
+    if (client == NULL) {
+        return false;
+    }
+    if (client->state != NTRIP_STATE_IDLE) {
+        return false;
+    }
+    /* Use 0 as timestamp — will be corrected on first service_step call */
+    client->started = true;
+    return ntrip_client_transition(client, NTRIP_STATE_CONNECTING, 0);
+}
+
+bool ntrip_client_is_started(const ntrip_client_t* client)
+{
+    if (client == NULL) {
+        return false;
+    }
+    return client->started;
 }
 
 void ntrip_client_set_tcp_source(ntrip_client_t* client, byte_ring_buffer_t* source)
@@ -113,41 +135,76 @@ uint32_t ntrip_client_get_reconnect_count(const ntrip_client_t* client)
     return client->reconnect_count;
 }
 
-/* ---- RTCM Data API ---- */
+/* ---- Service step ---- */
 
 void ntrip_client_service_step(runtime_component_t* comp, uint64_t timestamp_us)
 {
     ntrip_client_t* client = (ntrip_client_t*)comp;
-    if (client == NULL) {
+    if (client == NULL || !client->started) {
         return;
     }
 
-    /* Only process TCP data when connected */
-    if (client->state != NTRIP_STATE_CONNECTED) {
-        return;
+    /* Fix initial timestamp (ntrip_client_start uses 0) */
+    if (client->last_state_change_us == 0 && timestamp_us > 0) {
+        client->last_state_change_us = timestamp_us;
     }
 
-    /* Read from TCP source buffer into RTCM output buffer */
-    if (client->tcp_source == NULL) {
-        return;
-    }
+    uint64_t elapsed = timestamp_us - client->last_state_change_us;
 
-    uint8_t tmp[128];
-    size_t available = byte_ring_buffer_available(client->tcp_source);
-    if (available == 0) {
-        return;
-    }
+    /* ---- Skeleton state progression (simulated TCP handshake) ---- */
+    switch (client->state) {
+    case NTRIP_STATE_CONNECTING:
+        /* Simulate TCP connect timeout */
+        if (elapsed >= NTRIP_SKELETON_CONNECTING_TIMEOUT_US) {
+            ntrip_client_transition(client, NTRIP_STATE_AUTHENTICATING, timestamp_us);
+        }
+        break;
 
-    size_t to_read = available > sizeof(tmp) ? sizeof(tmp) : available;
-    size_t pulled = byte_ring_buffer_read(client->tcp_source, tmp, to_read);
-    if (pulled > 0) {
-        byte_ring_buffer_write(&client->rtcm_buffer, tmp, pulled);
-    }
+    case NTRIP_STATE_AUTHENTICATING:
+        /* Simulate NTRIP auth response timeout */
+        if (elapsed >= NTRIP_SKELETON_AUTHENTICATING_TIMEOUT_US) {
+            ntrip_client_transition(client, NTRIP_STATE_CONNECTED, timestamp_us);
+        }
+        break;
 
-    /* Skeleton: no connection timeout, keepalive, or reconnection logic.
-     * These would be added in the real NTRIP implementation. */
-    (void)timestamp_us;
+    case NTRIP_STATE_CONNECTED:
+        /* Forward RTCM data from TCP source to RTCM output buffer */
+        if (client->tcp_source == NULL) {
+            break;
+        }
+
+        {
+            uint8_t tmp[128];
+            size_t available = byte_ring_buffer_available(client->tcp_source);
+            if (available > 0) {
+                size_t to_read = available > sizeof(tmp) ? sizeof(tmp) : available;
+                size_t pulled = byte_ring_buffer_read(client->tcp_source, tmp, to_read);
+                if (pulled > 0) {
+                    byte_ring_buffer_write(&client->rtcm_buffer, tmp, pulled);
+                }
+            }
+        }
+        break;
+
+    case NTRIP_STATE_ERROR:
+        /* Skeleton: auto-retry after error (with backoff) */
+        if (elapsed >= NTRIP_SKELETON_AUTHENTICATING_TIMEOUT_US) {
+            ntrip_client_transition(client, NTRIP_STATE_RECONNECT, timestamp_us);
+        }
+        break;
+
+    case NTRIP_STATE_RECONNECT:
+        /* Skeleton: immediately retry */
+        ntrip_client_transition(client, NTRIP_STATE_CONNECTING, timestamp_us);
+        break;
+
+    case NTRIP_STATE_IDLE:
+    default:
+        break;
+    }
 }
+
+/* ---- RTCM Data API ---- */
 
 size_t ntrip_client_pop_rtcm(ntrip_client_t* client, uint8_t* buf, size_t max_len)
 {

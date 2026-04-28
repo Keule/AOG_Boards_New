@@ -24,6 +24,12 @@ typedef enum {
 /* RTCM output buffer size */
 #define NTRIP_RTCM_BUFFER_SIZE  512
 
+/* Skeleton state transition timeouts (microseconds).
+ * Simulate TCP handshake and auth delays in skeleton mode.
+ * In a real implementation these would be driven by actual TCP events. */
+#define NTRIP_SKELETON_CONNECTING_TIMEOUT_US    1000000u  /* 1 second */
+#define NTRIP_SKELETON_AUTHENTICATING_TIMEOUT_US 1000000u  /* 1 second */
+
 /* ---- NTRIP Client Instance ----
  *
  * Independent NTRIP skeleton with own state machine and RTCM output buffer.
@@ -32,12 +38,19 @@ typedef enum {
  *
  * This component does NOT own the TCP transport or the RTCM router.
  *
+ * Skeleton mode:
+ *   After calling ntrip_client_start(), the state machine auto-progresses:
+ *   IDLE -> CONNECTING -> AUTHENTICATING -> CONNECTED
+ *   using simulated timeouts. In CONNECTED state, RTCM data from the
+ *   TCP source buffer is forwarded to the RTCM output buffer.
+ *
  * IMPORTANT: runtime_component_t MUST be the first field for safe casting. */
 typedef struct {
     runtime_component_t component;    /* MUST be first */
 
     /* State machine */
     ntrip_state_t state;
+    bool         started;              /* true after ntrip_client_start() called */
     uint32_t     reconnect_count;
     uint64_t     last_state_change_us;
 
@@ -55,6 +68,12 @@ typedef struct {
  * tcp_source may be NULL and set later via ntrip_client_set_tcp_source(). */
 void ntrip_client_init(ntrip_client_t* client);
 
+/* Start the NTRIP connection sequence.
+ * Transitions from IDLE to CONNECTING. After that, service_step() will
+ * auto-progress through the skeleton state machine using simulated timeouts.
+ * Returns true if start was triggered, false if not in IDLE state. */
+bool ntrip_client_start(ntrip_client_t* client);
+
 /* Set the TCP data source buffer (e.g., transport_tcp.rx_buffer).
  * The source is NOT owned by the client. */
 void ntrip_client_set_tcp_source(ntrip_client_t* client, byte_ring_buffer_t* source);
@@ -66,6 +85,9 @@ bool ntrip_client_transition(ntrip_client_t* client, ntrip_state_t new_state, ui
 /* Get current state */
 ntrip_state_t ntrip_client_get_state(const ntrip_client_t* client);
 
+/* Check if the client has been started (ntrip_client_start() was called). */
+bool ntrip_client_is_started(const ntrip_client_t* client);
+
 /* Get state name as string (for debugging/logging) */
 const char* ntrip_client_state_name(ntrip_state_t state);
 
@@ -74,8 +96,10 @@ uint32_t ntrip_client_get_reconnect_count(const ntrip_client_t* client);
 
 /* ---- RTCM Data API ---- */
 
-/* Service step: read from TCP source, manage state machine.
+/* Service step: manage state machine progression, read from TCP source.
  * When state == CONNECTED, incoming data is stored in the RTCM output buffer.
+ * Skeleton mode: auto-progresses CONNECTING -> AUTHENTICATING -> CONNECTED
+ * with simulated timeouts after ntrip_client_start() has been called.
  * Called by the runtime service loop. */
 void ntrip_client_service_step(runtime_component_t* comp, uint64_t timestamp_us);
 

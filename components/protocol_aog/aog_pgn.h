@@ -54,6 +54,40 @@ typedef struct {
     double roll;       /* radians */
 } aog_heading_t;
 
+/* PGN 252 - Steering Input (from AgOpenGPS to module)
+ * Data layout (8 bytes):
+ *   [0..3] : vehicle speed in m/s  (float, little-endian)
+ *   [4..7] : steer angle setpoint  (float, little-endian, degrees)
+ */
+#define AOG_PGN_STEER_INPUT       252
+#define AOG_PGN_STEER_STATUS      252   /* Same PGN, output direction */
+#define AOG_STEER_DATA_SIZE       8
+
+typedef struct {
+    float speed_ms;            /* vehicle speed m/s */
+    float steer_angle_deg;     /* steering angle setpoint degrees */
+} aog_steer_input_t;
+
+/* PGN 252 - Steering Status (module -> AgOpenGPS output)
+ * Data layout (8 bytes):
+ *   [0..3] : actual steer angle    (float, little-endian, degrees)
+ *   [4]    : status byte  (0=disabled, 1=manual, 2=auto)
+ *   [5]    : flags (reserved)
+ *   [6..7] : padding
+ */
+#define AOG_STEER_STATUS_DATA_SIZE   8
+
+typedef struct {
+    float steer_angle_actual_deg;  /* actual steering angle */
+    uint8_t status;                /* 0=disabled, 1=manual, 2=auto */
+    uint8_t flags;                 /* reserved */
+} aog_steer_status_t;
+
+/* PGN 253 - Hello Request (from AgOpenGPS) */
+#ifndef AOG_PGN_HELLO_REQUEST
+#define AOG_PGN_HELLO_REQUEST   253
+#endif
+
 /* ---- PGN Encode/Decode ---- */
 
 /* Encode Hello PGN into data buffer. Buffer must have AOG_HELLO_DATA_SIZE bytes.

@@ -34,10 +34,14 @@ struct runtime_component {
     runtime_component_service_fn_t service_step;
 };
 
-void runtime_component_clear_all(void);
 int runtime_component_register(runtime_component_t* component);
 size_t runtime_component_count(void);
 runtime_component_t* runtime_component_get(size_t index);
+
+/* Iterate over all registered components and call their service_step()
+ * callback if non-NULL. Subsystem-local execution — no business logic here.
+ * timestamp_us: current timestamp in microseconds. */
+void runtime_service_step_all(uint64_t timestamp_us);
 
 #ifdef __cplusplus
 }
