@@ -1,60 +1,40 @@
 #include "hal_spi.h"
 
+#include "hal_backend.h"
+#include "hal_spi_backend.h"
+
 int hal_spi_bus_init(hal_spi_bus_t* bus, const hal_spi_bus_config_t* config)
 {
-    if (bus == 0 || config == 0) {
-        return -1;
+    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
+        return hal_spi_backend_sim_bus_init(bus, config);
     }
 
-    bus->role = config->role;
-    bus->frequency_hz = config->frequency_hz;
-    bus->initialized = 1;
-
-    return 0;
+    return hal_spi_backend_esp32_bus_init(bus, config);
 }
 
 int hal_spi_bus_deinit(hal_spi_bus_t* bus)
 {
-    if (bus == 0) {
-        return -1;
+    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
+        return hal_spi_backend_sim_bus_deinit(bus);
     }
 
-    bus->initialized = 0;
-    return 0;
+    return hal_spi_backend_esp32_bus_deinit(bus);
 }
 
 int hal_spi_device_init(hal_spi_device_t* device, hal_spi_bus_t* bus, uint8_t chip_select)
 {
-    if (device == 0 || bus == 0 || bus->initialized == 0) {
-        return -1;
+    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
+        return hal_spi_backend_sim_device_init(device, bus, chip_select);
     }
 
-    device->bus = bus;
-    device->chip_select = chip_select;
-    device->initialized = 1;
-
-    return 0;
+    return hal_spi_backend_esp32_device_init(device, bus, chip_select);
 }
 
 int hal_spi_transfer(hal_spi_device_t* device, const uint8_t* tx, uint8_t* rx, size_t length)
 {
-    size_t i = 0;
-
-    if (device == 0 || device->initialized == 0) {
-        return -1;
+    if (hal_backend_get_kind() == HAL_BACKEND_SIM) {
+        return hal_spi_backend_sim_transfer(device, tx, rx, length);
     }
 
-    for (i = 0; i < length; i++) {
-        uint8_t value = 0;
-
-        if (tx != 0) {
-            value = tx[i];
-        }
-
-        if (rx != 0) {
-            rx[i] = value;
-        }
-    }
-
-    return 0;
+    return hal_spi_backend_esp32_transfer(device, tx, rx, length);
 }
