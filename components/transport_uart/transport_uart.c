@@ -2,16 +2,12 @@
 #include "hal_uart.h"
 #include <string.h>
 
-/* ---- Internal helpers ---- */
-
 /* Forward cast: runtime_component_t* → transport_uart_t*
  * Safe because runtime_component_t is the first field. */
 static transport_uart_t* comp_to_uart(runtime_component_t* comp)
 {
     return (transport_uart_t*)comp;
 }
-
-/* ---- Init ---- */
 
 hal_err_t transport_uart_init(transport_uart_t* uart, const transport_uart_config_t* config)
 {
@@ -29,8 +25,8 @@ hal_err_t transport_uart_init(transport_uart_t* uart, const transport_uart_confi
     uart->baudrate = config->baudrate;
 
     /* Init RX/TX ring buffers */
-    byte_ring_buffer_init(&uart->rx_buffer, uart->rx_storage, sizeof(uart->rx_storage));
-    byte_ring_buffer_init(&uart->tx_buffer, uart->tx_storage, sizeof(uart->tx_storage));
+    byte_ring_buffer_init(&uart->rx_buffer, uart->rx_storage, TRANSPORT_UART_RX_BUFFER_SIZE);
+    byte_ring_buffer_init(&uart->tx_buffer, uart->tx_storage, TRANSPORT_UART_TX_BUFFER_SIZE);
 
     /* Configure HAL UART */
     hal_uart_config_t hal_cfg = HAL_UART_CONFIG_DEFAULT();
@@ -47,13 +43,24 @@ hal_err_t transport_uart_init(transport_uart_t* uart, const transport_uart_confi
     return HAL_OK;
 }
 
-/* ---- Service Step ----
- *
- * RX: read from HAL UART into RX buffer (128-byte bursts for 921600 baud).
- * TX: drain TX buffer to HAL UART.
- *     PARTIAL WRITE SAFE: only consumes bytes actually written by HAL.
- *     Unwritten bytes are pushed back into the ring buffer.
- */
+hal_err_t transport_uart_reset(transport_uart_t* uart)
+{
+    if (uart == NULL) {
+        return HAL_ERR_INVALID_PARAM;
+    }
+
+    /* Flush HAL UART */
+    hal_uart_flush(uart->port);
+
+    /* Reset ring buffers (preserving storage) */
+    byte_ring_buffer_init(&uart->rx_buffer, uart->rx_storage, TRANSPORT_UART_RX_BUFFER_SIZE);
+    byte_ring_buffer_init(&uart->tx_buffer, uart->tx_storage, TRANSPORT_UART_TX_BUFFER_SIZE);
+
+    /* Zero statistics */
+    memset(&uart->stats, 0, sizeof(uart->stats));
+
+    return HAL_OK;
+}
 
 void transport_uart_service_step(runtime_component_t* comp, uint64_t timestamp_us)
 {
@@ -63,63 +70,46 @@ void transport_uart_service_step(runtime_component_t* comp, uint64_t timestamp_u
         return;
     }
 
-    /* ---- RX: HAL UART → rx_buffer ---- */
-    uint8_t rx_tmp[128];
+    /* ---- RX: read from HAL UART into RX buffer ---- */
+    uint8_t rx_tmp[64];
     int n = hal_uart_read(uart->port, rx_tmp, sizeof(rx_tmp));
     if (n > 0) {
-        uart->rx_total += (uint32_t)n;
-        byte_ring_buffer_write(&uart->rx_buffer, rx_tmp, (size_t)n);
-    }
+        size_t written = byte_ring_buffer_write(&uart->rx_buffer, rx_tmp, (size_t)n);
+        uart->stats.rx_bytes_in += written;
 
-    /* Track RX overflows from ring buffer */
-    uint32_t new_overflows = byte_ring_buffer_overflow_count(&uart->rx_buffer);
-    if (new_overflows > uart->rx_overflows) {
-        uart->rx_overflows = new_overflows;
-    }
-
-    /* Track RX highwater mark */
-    size_t rx_used = byte_ring_buffer_available(&uart->rx_buffer);
-    if (rx_used > uart->rx_highwater) {
-        uart->rx_highwater = rx_used;
-    }
-
-    /* ---- TX: tx_buffer → HAL UART (partial write safe) ---- */
-    uint8_t tx_tmp[128];
-    while (byte_ring_buffer_available(&uart->tx_buffer) > 0) {
-        size_t avail = byte_ring_buffer_available(&uart->tx_buffer);
-        size_t chunk = avail > sizeof(tx_tmp) ? sizeof(tx_tmp) : avail;
-        size_t drained = byte_ring_buffer_read(&uart->tx_buffer, tx_tmp, chunk);
-        if (drained == 0) {
-            break;
+        /* Track RX overflow from ring buffer */
+        uint32_t rx_overflow = byte_ring_buffer_overflow_count(&uart->rx_buffer);
+        if (rx_overflow > uart->stats.rx_overflow_count) {
+            uart->stats.rx_overflow_count = rx_overflow;
         }
+    }
 
-        int written = hal_uart_write(uart->port, tx_tmp, drained);
+    /* ---- TX: drain TX buffer to HAL UART (partial-write safe) ---- */
+    uint8_t tx_tmp[64];
+    size_t avail = byte_ring_buffer_available(&uart->tx_buffer);
+    if (avail > 0) {
+        /* Step 1: Drain bytes from ring buffer */
+        size_t to_drain = avail > sizeof(tx_tmp) ? sizeof(tx_tmp) : avail;
+        size_t drained = byte_ring_buffer_read(&uart->tx_buffer, tx_tmp, to_drain);
 
-        if (written <= 0) {
-            /* HAL cannot accept any data — push everything back */
-            byte_ring_buffer_write(&uart->tx_buffer, tx_tmp, drained);
-            uart->tx_backpressure_count++;
-            break;
-        }
+        if (drained > 0) {
+            /* Step 2: Write to HAL UART */
+            int written = hal_uart_write(uart->port, tx_tmp, drained);
 
-        uart->tx_total += (uint32_t)written;
+            if (written >= 0 && (size_t)written < drained) {
+                /* Step 3: Partial write — push unwritten bytes back */
+                size_t unwritten = drained - (size_t)written;
+                byte_ring_buffer_write(&uart->tx_buffer,
+                                       tx_tmp + (size_t)written,
+                                       unwritten);
+                uart->stats.tx_partial_writes++;
+                uart->stats.tx_pushback_bytes += unwritten;
+            }
 
-        if ((size_t)written < drained) {
-            /* Partial write — push unwritten bytes back to ring buffer.
-             * Order is preserved: remaining bytes are written back after
-             * any bytes that might have been added by producers between
-             * our read and now. Since service_step runs in a single task,
-             * no concurrent writes can occur, so FIFO order is maintained. */
-            byte_ring_buffer_write(&uart->tx_buffer,
-                                   tx_tmp + written,
-                                   drained - (size_t)written);
-            uart->tx_backpressure_count++;
-            break;  /* HAL is backed up — retry next service_step call */
+            uart->stats.tx_bytes_out += (written > 0) ? (size_t)written : 0;
         }
     }
 }
-
-/* ---- Public API ---- */
 
 size_t transport_uart_rx_read(transport_uart_t* uart, uint8_t* buf, size_t max_len)
 {
@@ -156,73 +146,30 @@ size_t transport_uart_tx_free(const transport_uart_t* uart)
     return uart->tx_buffer.capacity - uart->tx_buffer.size;
 }
 
-/* ---- Statistics ---- */
-
-hal_err_t transport_uart_get_rx_stats(const transport_uart_t* uart, uint32_t* total, uint32_t* overflows)
+const transport_uart_stats_t* transport_uart_get_stats(const transport_uart_t* uart)
 {
     if (uart == NULL) {
-        return HAL_ERR_INVALID_PARAM;
+        return NULL;
     }
-    if (total != NULL) {
-        *total = uart->rx_total;
-    }
-    if (overflows != NULL) {
-        *overflows = uart->rx_overflows;
-    }
-    return HAL_OK;
+    return &uart->stats;
 }
 
-hal_err_t transport_uart_get_tx_stats(const transport_uart_t* uart, uint32_t* total)
-{
-    if (uart == NULL || total == NULL) {
-        return HAL_ERR_INVALID_PARAM;
-    }
-    *total = uart->tx_total;
-    return HAL_OK;
-}
-
-hal_err_t transport_uart_get_diagnostics(const transport_uart_t* uart, transport_uart_diagnostics_t* diag)
+hal_err_t transport_uart_diagnostics(const transport_uart_t* uart, transport_uart_diagnostics_t* diag)
 {
     if (uart == NULL || diag == NULL) {
         return HAL_ERR_INVALID_PARAM;
     }
 
-    diag->rx_total              = uart->rx_total;
-    diag->tx_total              = uart->tx_total;
-    diag->rx_overflows          = uart->rx_overflows;
-    diag->rx_highwater          = uart->rx_highwater;
-    diag->tx_backpressure_count = uart->tx_backpressure_count;
-    diag->rx_available          = byte_ring_buffer_available(&uart->rx_buffer);
-    diag->tx_free               = (uart->tx_buffer.capacity >= uart->tx_buffer.size)
-                                    ? (uart->tx_buffer.capacity - uart->tx_buffer.size)
-                                    : 0;
+    diag->rx_buffer_size = (uint32_t)uart->rx_buffer.capacity;
+    diag->rx_buffer_used = (uint32_t)uart->rx_buffer.size;
+    diag->rx_buffer_free = (uint32_t)(uart->rx_buffer.capacity - uart->rx_buffer.size);
+    diag->rx_overflow_total = byte_ring_buffer_overflow_count(&uart->rx_buffer);
 
-    return HAL_OK;
-}
+    diag->tx_buffer_size = (uint32_t)uart->tx_buffer.capacity;
+    diag->tx_buffer_used = (uint32_t)uart->tx_buffer.size;
+    diag->tx_buffer_free = (uint32_t)(uart->tx_buffer.capacity - uart->tx_buffer.size);
 
-/* ---- Reset / Recovery ---- */
-
-hal_err_t transport_uart_reset(transport_uart_t* uart)
-{
-    if (uart == NULL) {
-        return HAL_ERR_INVALID_PARAM;
-    }
-
-    /* Step 1: Flush any pending data from HAL UART */
-    hal_uart_flush(uart->port);
-
-    /* Step 2: Clear and reinitialize ring buffers */
-    byte_ring_buffer_init(&uart->rx_buffer, uart->rx_storage, sizeof(uart->rx_storage));
-    byte_ring_buffer_init(&uart->tx_buffer, uart->tx_storage, sizeof(uart->tx_storage));
-
-    /* Step 3: Reset all statistics counters */
-    uart->rx_total              = 0;
-    uart->tx_total              = 0;
-    uart->rx_overflows          = 0;
-    uart->rx_highwater          = 0;
-    uart->tx_backpressure_count = 0;
-
-    /* Port and baudrate config are preserved */
+    diag->stats = uart->stats;
 
     return HAL_OK;
 }

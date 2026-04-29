@@ -1,7 +1,0 @@
-{
-    "name": "runtime_components",
-    "build": {
-        "srcDir": ".",
-        "includeDir": "."
-    }
-}

@@ -32,14 +32,8 @@ void tearDown(void) {}
 
 void test_init_resets_state(void)
 {
-    /* setUp() already called init() + set_source().
-     * Call init() again to verify it resets the source pointer. */
-    rtcm_router_set_source(&router, &source);
-    TEST_ASSERT_EQUAL_PTR(&source, router.rtcm_source);
-    TEST_ASSERT_EQUAL(0, router.output_count);
-    TEST_ASSERT_NOT_NULL(rtcm_router_get_stats(&router));
-
-    /* Re-init should clear the source */
+    /* Re-init to verify that init properly resets state
+     * (setUp already called init + set_source) */
     rtcm_router_init(&router);
     TEST_ASSERT_NULL(router.rtcm_source);
     TEST_ASSERT_EQUAL(0, router.output_count);

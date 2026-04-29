@@ -402,28 +402,21 @@ static void nmea_finalize_sentence(nmea_parser_t* parser)
 {
     parser->type = nmea_identify_sentence(parser->buffer);
 
-    /* Skip the sentence identifier (e.g. "GNGGA,") so that
-     * nmea_parse_gga/rmc/... receive only the data fields,
-     * where field 0 is the first data field (utc_time, etc.). */
-    char* data = parser->buffer;
-    while (*data != '\0' && *data != ',') data++;
-    if (*data == ',') data++;
-
     switch (parser->type) {
     case NMEA_SENTENCE_GGA:
-        nmea_parse_gga(parser, data);
+        nmea_parse_gga(parser, parser->buffer);
         break;
     case NMEA_SENTENCE_RMC:
-        nmea_parse_rmc(parser, data);
+        nmea_parse_rmc(parser, parser->buffer);
         break;
     case NMEA_SENTENCE_GST:
-        nmea_parse_gst(parser, data);
+        nmea_parse_gst(parser, parser->buffer);
         break;
     case NMEA_SENTENCE_GSV:
-        nmea_parse_gsv(parser, data);
+        nmea_parse_gsv(parser, parser->buffer);
         break;
     case NMEA_SENTENCE_GSA:
-        nmea_parse_gsa(parser, data);
+        nmea_parse_gsa(parser, parser->buffer);
         break;
     default:
         break;

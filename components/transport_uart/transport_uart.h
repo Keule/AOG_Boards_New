@@ -14,27 +14,37 @@ extern "C" {
 
 /* ---- Transport UART Config ---- */
 
-#define TRANSPORT_UART_RX_BUFFER_SIZE  1024
-#define TRANSPORT_UART_TX_BUFFER_SIZE  512
+#define TRANSPORT_UART_RX_BUFFER_SIZE  256
+#define TRANSPORT_UART_TX_BUFFER_SIZE  256
 
 typedef struct {
     board_uart_port_t port;
     uint32_t baudrate;
 } transport_uart_config_t;
 
-/* ---- Transport UART Diagnostics ----
- *
- * Snapshot struct for monitoring and logging hooks.
- * Read via transport_uart_get_diagnostics(). */
+/* ---- Transport UART Statistics ---- */
 
 typedef struct {
-    uint32_t rx_total;              /* Cumulative bytes received from HAL */
-    uint32_t tx_total;              /* Cumulative bytes transmitted via HAL */
-    uint32_t rx_overflows;          /* RX ring buffer overflow count */
-    uint32_t rx_highwater;          /* Peak RX buffer usage (bytes) */
-    uint32_t tx_backpressure_count; /* Number of TX partial write / failure events */
-    size_t   rx_available;          /* Current bytes waiting in RX buffer */
-    size_t   tx_free;               /* Current free space in TX buffer */
+    uint32_t rx_bytes_in;        /* Total bytes read from HAL into RX buffer     */
+    uint32_t rx_overflow_count;  /* RX ring buffer overflow counter               */
+    uint32_t tx_bytes_out;       /* Total bytes written from TX buffer to HAL     */
+    uint32_t tx_partial_writes;  /* Number of times HAL wrote fewer bytes than
+                                    requested (backpressure event)               */
+    uint32_t tx_pushback_bytes;  /* Total bytes pushed back to TX buffer after
+                                    a partial write                               */
+} transport_uart_stats_t;
+
+/* ---- Transport UART Diagnostics ---- */
+
+typedef struct {
+    uint32_t rx_buffer_size;
+    uint32_t rx_buffer_used;
+    uint32_t rx_buffer_free;
+    uint32_t tx_buffer_size;
+    uint32_t tx_buffer_used;
+    uint32_t tx_buffer_free;
+    uint32_t rx_overflow_total;
+    transport_uart_stats_t stats;
 } transport_uart_diagnostics_t;
 
 /* ---- Transport UART Instance ----
@@ -45,19 +55,17 @@ typedef struct {
  * This component contains NO protocol logic (no NMEA, AOG, RTCM parsing).
  * It only transports bytes between HAL and ring buffers.
  *
+ * TX partial write safety:
+ *   When HAL writes fewer bytes than drained from the TX ring buffer,
+ *   the unwritten bytes are pushed back to the front of the ring buffer
+ *   so no data is silently lost during backpressure.
+ *
  * IMPORTANT: runtime_component_t MUST be the first field for safe casting. */
 typedef struct {
     runtime_component_t component;    /* MUST be first */
 
     board_uart_port_t port;
     uint32_t baudrate;
-
-    /* Statistics */
-    uint32_t rx_total;              /* total bytes received from HAL */
-    uint32_t tx_total;              /* total bytes transmitted via HAL */
-    uint32_t rx_overflows;          /* RX buffer overflow count */
-    uint32_t rx_highwater;          /* peak RX buffer usage */
-    uint32_t tx_backpressure_count; /* TX partial write / failure count */
 
     /* RX: HAL UART → ring buffer */
     uint8_t             rx_storage[TRANSPORT_UART_RX_BUFFER_SIZE];
@@ -66,18 +74,33 @@ typedef struct {
     /* TX: ring buffer → HAL UART */
     uint8_t             tx_storage[TRANSPORT_UART_TX_BUFFER_SIZE];
     byte_ring_buffer_t  tx_buffer;
+
+    /* Statistics */
+    transport_uart_stats_t stats;
 } transport_uart_t;
 
 /* ---- API ---- */
 
 /* Initialize UART transport.
- * Sets up HAL UART port, inits RX/TX ring buffers.
- * Configures service_step callback for the runtime component. */
+ * Sets up HAL UART port, inits RX/TX ring buffers, zeros stats.
+ * Configures service_step callback for the runtime component.
+ *
+ * IMPORTANT: hal_uart_init() must be called with a valid ops table
+ * (e.g. hal_uart_stub_ops() for native tests) BEFORE calling this. */
 hal_err_t transport_uart_init(transport_uart_t* uart, const transport_uart_config_t* config);
+
+/* Reset transport UART: re-initialise buffers and stats.
+ * Does NOT re-initialise the HAL port (caller must do that separately). */
+hal_err_t transport_uart_reset(transport_uart_t* uart);
 
 /* Service step: HAL RX → rx_buffer, tx_buffer → HAL TX.
  * Called by the runtime service loop. Non-blocking.
- * TX partial write safe: only consumes bytes actually written by HAL. */
+ *
+ * TX partial write handling:
+ *   1. Drain up to 64 bytes from TX ring buffer
+ *   2. Write drained bytes to HAL UART
+ *   3. If HAL wrote fewer bytes, push unwritten bytes back to ring buffer
+ *   4. Increment tx_partial_writes and tx_pushback_bytes counters */
 void transport_uart_service_step(runtime_component_t* comp, uint64_t timestamp_us);
 
 /* Read bytes from RX buffer (consumed by upstream components).
@@ -85,7 +108,7 @@ void transport_uart_service_step(runtime_component_t* comp, uint64_t timestamp_u
 size_t transport_uart_rx_read(transport_uart_t* uart, uint8_t* buf, size_t max_len);
 
 /* Write bytes into TX buffer (produced by upstream components).
- * Returns number of bytes written. */
+ * Returns number of bytes written (may be less than len if buffer is full). */
 size_t transport_uart_tx_write(transport_uart_t* uart, const uint8_t* data, size_t len);
 
 /* Bytes available in RX buffer. */
@@ -94,19 +117,11 @@ size_t transport_uart_rx_available(const transport_uart_t* uart);
 /* Free space in TX buffer. */
 size_t transport_uart_tx_free(const transport_uart_t* uart);
 
-/* Get RX statistics (total bytes, overflows). Returns HAL_OK on success. */
-hal_err_t transport_uart_get_rx_stats(const transport_uart_t* uart, uint32_t* total, uint32_t* overflows);
+/* Get pointer to statistics (read-only access, valid as long as uart lives). */
+const transport_uart_stats_t* transport_uart_get_stats(const transport_uart_t* uart);
 
-/* Get TX statistics (total bytes transmitted). Returns HAL_OK on success. */
-hal_err_t transport_uart_get_tx_stats(const transport_uart_t* uart, uint32_t* total);
-
-/* Get full diagnostics snapshot. Returns HAL_OK on success. */
-hal_err_t transport_uart_get_diagnostics(const transport_uart_t* uart, transport_uart_diagnostics_t* diag);
-
-/* Reset transport: flush HAL UART, clear RX/TX buffers, reset statistics.
- * Port and baudrate config are preserved. Safe to call at any time.
- * Does NOT reinitialize the HAL port (use hal_uart_port_reset for that). */
-hal_err_t transport_uart_reset(transport_uart_t* uart);
+/* Fill diagnostics struct. Returns HAL_OK on success. */
+hal_err_t transport_uart_diagnostics(const transport_uart_t* uart, transport_uart_diagnostics_t* diag);
 
 #ifdef __cplusplus
 }

@@ -1,7 +1,0 @@
-{
-    "name": "rtcm_router",
-    "build": {
-        "srcDir": ".",
-        "includeDir": "."
-    }
-}

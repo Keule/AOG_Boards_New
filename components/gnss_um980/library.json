@@ -1,7 +1,0 @@
-{
-    "name": "gnss_um980",
-    "build": {
-        "srcDir": ".",
-        "includeDir": "."
-    }
-}

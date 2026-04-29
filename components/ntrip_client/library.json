@@ -1,7 +1,0 @@
-{
-    "name": "ntrip_client",
-    "build": {
-        "srcDir": ".",
-        "includeDir": "."
-    }
-}
