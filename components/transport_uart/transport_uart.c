@@ -51,21 +51,31 @@ void transport_uart_service_step(runtime_component_t* comp, uint64_t timestamp_u
         return;
     }
 
-    /* RX: read from HAL UART into RX buffer */
-    uint8_t rx_tmp[64];
+    /* RX: read from HAL UART into RX buffer (128-byte bursts for 921600 baud) */
+    uint8_t rx_tmp[128];
     int n = hal_uart_read(uart->port, rx_tmp, sizeof(rx_tmp));
     if (n > 0) {
+        uart->rx_total += (uint32_t)n;
         byte_ring_buffer_write(&uart->rx_buffer, rx_tmp, (size_t)n);
     }
 
-    /* TX: drain TX buffer to HAL UART */
-    uint8_t tx_tmp[64];
+    /* Track RX overflows from ring buffer */
+    uint32_t new_overflows = byte_ring_buffer_overflow_count(&uart->rx_buffer);
+    if (new_overflows > uart->rx_overflows) {
+        uart->rx_overflows = new_overflows;
+    }
+
+    /* TX: drain TX buffer to HAL UART (128-byte bursts) */
+    uint8_t tx_tmp[128];
     size_t avail = byte_ring_buffer_available(&uart->tx_buffer);
     if (avail > 0) {
         size_t to_drain = avail > sizeof(tx_tmp) ? sizeof(tx_tmp) : avail;
         size_t drained = byte_ring_buffer_read(&uart->tx_buffer, tx_tmp, to_drain);
         if (drained > 0) {
-            hal_uart_write(uart->port, tx_tmp, drained);
+            int written = hal_uart_write(uart->port, tx_tmp, drained);
+            if (written > 0) {
+                uart->tx_total += (uint32_t)written;
+            }
         }
     }
 }
@@ -103,4 +113,27 @@ size_t transport_uart_tx_free(const transport_uart_t* uart)
         return 0;
     }
     return uart->tx_buffer.capacity - uart->tx_buffer.size;
+}
+
+hal_err_t transport_uart_get_rx_stats(const transport_uart_t* uart, uint32_t* total, uint32_t* overflows)
+{
+    if (uart == NULL) {
+        return HAL_ERR_INVALID_PARAM;
+    }
+    if (total != NULL) {
+        *total = uart->rx_total;
+    }
+    if (overflows != NULL) {
+        *overflows = uart->rx_overflows;
+    }
+    return HAL_OK;
+}
+
+hal_err_t transport_uart_get_tx_stats(const transport_uart_t* uart, uint32_t* total)
+{
+    if (uart == NULL || total == NULL) {
+        return HAL_ERR_INVALID_PARAM;
+    }
+    *total = uart->tx_total;
+    return HAL_OK;
 }

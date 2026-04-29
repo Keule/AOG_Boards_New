@@ -24,6 +24,9 @@ COMPONENTS = [
     "runtime_components",  # runtime_component.c/h
     "runtime_buffers",     # byte_ring_buffer.c/h
     "runtime_snapshot",    # snapshot_buffer.c/h
+    "hal_backend",         # hal_backend.c/h (no ESP-IDF dependency)
+    "hal_uart",            # hal_uart.c/h (has ESP_PLATFORM guards, stubs for native)
+    "transport_uart",      # transport_uart.c/h (needs hal_uart stubs)
     "protocol_nmea",       # nmea_parser.c/h
     "protocol_rtcm",       # rtcm_passthrough.c/h
     "ntrip_client",        # ntrip_client.c/h

@@ -1,5 +1,5 @@
 Verbosity level can be increased via `-v, -vv, or -vvv` option
-Collected 5 tests
+Collected 6 tests
 
 Processing sim/test_nav_chain in native environment
 --------------------------------------------------------------------------------
@@ -10,7 +10,18 @@ test/sim/test_nav_chain/test_nav_chain.c:303: test_secondary_rx_gga_gives_fix	[P
 test/sim/test_nav_chain/test_nav_chain.c:306: test_both_gnss_instances_independent	[PASSED]
 test/sim/test_nav_chain/test_nav_chain.c:309: test_ntrip_connects_and_receives_tcp_data	[PASSED]
 test/sim/test_nav_chain/test_nav_chain.c:312: test_rtcm_router_distributes_to_both_uart_tx	[PASSED]
-------------- native:sim/test_nav_chain [PASSED] Took 0.95 seconds -------------
+------------- native:sim/test_nav_chain [PASSED] Took 0.96 seconds -------------
+
+Processing hardware/test_uart_um980_smoke in native environment
+--------------------------------------------------------------------------------
+Building...
+Testing...
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:116: test_uart_init_both_ports: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:153: test_rx_receives_nmea: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:189: test_tx_accepts_rtcm: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:228: test_sustained_no_crash: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:290: test_nmea_checksum_valid: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
+------- native:hardware/test_uart_um980_smoke [PASSED] Took 0.86 seconds -------
 
 Processing host/test_ntrip_client in native environment
 --------------------------------------------------------------------------------
@@ -32,7 +43,7 @@ test/host/test_ntrip_client/test_ntrip_client.c:232: test_rtcm_forwarding_when_c
 test/host/test_ntrip_client/test_ntrip_client.c:233: test_no_rtcm_forwarding_when_not_connected	[PASSED]
 test/host/test_ntrip_client/test_ntrip_client.c:234: test_service_step_null_does_not_crash	[PASSED]
 test/host/test_ntrip_client/test_ntrip_client.c:235: test_service_step_not_started_does_nothing	[PASSED]
------------ native:host/test_ntrip_client [PASSED] Took 0.87 seconds -----------
+----------- native:host/test_ntrip_client [PASSED] Took 0.88 seconds -----------
 
 Processing host/test_byte_ring_buffer in native environment
 --------------------------------------------------------------------------------
@@ -57,7 +68,7 @@ test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:240: test_available_matc
 test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:241: test_available_null_buffer_returns_zero	[PASSED]
 test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:242: test_overflow_count_increments	[PASSED]
 test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:243: test_overflow_count_null_buffer_returns_zero	[PASSED]
---------- native:host/test_byte_ring_buffer [PASSED] Took 0.91 seconds ---------
+--------- native:host/test_byte_ring_buffer [PASSED] Took 0.88 seconds ---------
 
 Processing host/test_rtcm_router in native environment
 --------------------------------------------------------------------------------
@@ -95,17 +106,17 @@ test/host/test_gnss_um980/test_gnss_um980.c:305: test_two_chunks_parse_correctly
 test/host/test_gnss_um980/test_gnss_um980.c:308: test_two_instances_are_independent	[PASSED]
 test/host/test_gnss_um980/test_gnss_um980.c:311: test_service_step_reads_from_rx_source	[PASSED]
 test/host/test_gnss_um980/test_gnss_um980.c:312: test_service_step_null_does_not_crash	[PASSED]
------------- native:host/test_gnss_um980 [PASSED] Took 0.89 seconds ------------
+------------ native:host/test_gnss_um980 [PASSED] Took 0.88 seconds ------------
 
 =================================== SUMMARY ===================================
 Environment    Test                        Status    Duration
 -------------  --------------------------  --------  ------------
-native         sim/test_nav_chain          PASSED    00:00:00.946
-native         host/test_ntrip_client      PASSED    00:00:00.875
-native         host/test_byte_ring_buffer  PASSED    00:00:00.910
-native         host/test_rtcm_router       PASSED    00:00:00.887
-native         host/test_gnss_um980        PASSED    00:00:00.890
-================= 66 test cases: 66 succeeded in 00:00:04.508 =================
+native         sim/test_nav_chain          PASSED    00:00:00.964
+native         host/test_ntrip_client      PASSED    00:00:00.884
+native         host/test_byte_ring_buffer  PASSED    00:00:00.881
+native         host/test_rtcm_router       PASSED    00:00:00.890
+native         host/test_gnss_um980        PASSED    00:00:00.884
+============ 71 test cases: 5 skipped, 66 succeeded in 00:00:05.365 ============
 ADR Compliance Checker
 Rules: /home/z/firmware-project/tools/adr_checks/adr_rules.yaml
 Repo:  /home/z/firmware-project

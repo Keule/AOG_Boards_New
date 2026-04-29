@@ -14,8 +14,8 @@ extern "C" {
 
 /* ---- Transport UART Config ---- */
 
-#define TRANSPORT_UART_RX_BUFFER_SIZE  256
-#define TRANSPORT_UART_TX_BUFFER_SIZE  256
+#define TRANSPORT_UART_RX_BUFFER_SIZE  1024
+#define TRANSPORT_UART_TX_BUFFER_SIZE  512
 
 typedef struct {
     board_uart_port_t port;
@@ -36,6 +36,11 @@ typedef struct {
 
     board_uart_port_t port;
     uint32_t baudrate;
+
+    /* Statistics */
+    uint32_t rx_total;      /* total bytes received */
+    uint32_t tx_total;      /* total bytes transmitted */
+    uint32_t rx_overflows;  /* RX buffer overflow count */
 
     /* RX: HAL UART → ring buffer */
     uint8_t             rx_storage[TRANSPORT_UART_RX_BUFFER_SIZE];
@@ -70,6 +75,12 @@ size_t transport_uart_rx_available(const transport_uart_t* uart);
 
 /* Free space in TX buffer. */
 size_t transport_uart_tx_free(const transport_uart_t* uart);
+
+/* Get RX statistics (total bytes, overflows). Returns HAL_OK on success. */
+hal_err_t transport_uart_get_rx_stats(const transport_uart_t* uart, uint32_t* total, uint32_t* overflows);
+
+/* Get TX statistics (total bytes transmitted). Returns HAL_OK on success. */
+hal_err_t transport_uart_get_tx_stats(const transport_uart_t* uart, uint32_t* total);
 
 #ifdef __cplusplus
 }

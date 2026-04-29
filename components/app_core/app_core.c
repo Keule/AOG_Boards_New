@@ -10,6 +10,7 @@
 /* ---- Navigation subsystem includes ----
  * Only compiled in when a navigation role is active. */
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
+#include "hal_uart.h"
 #include "transport_uart.h"
 #include "transport_udp.h"
 #include "transport_tcp.h"
@@ -102,6 +103,9 @@ void app_core_init(void)
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
     if (features & (FEATURE_ROLE_NAVIGATION | FEATURE_ROLE_FULL_TEST)) {
         ESP_LOGI(TAG, "Initializing navigation subsystem");
+
+        /* Initialize HAL UART backend (ESP32) */
+        hal_uart_init(hal_uart_esp32_ops());
 
         /* --- Transport layer --- */
         if (board_profile_has_uart(BOARD_UART_GNSS_PRIMARY)) {

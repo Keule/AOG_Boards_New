@@ -47,6 +47,7 @@ hal_err_t hal_uart_port_init(board_uart_port_t port, const hal_uart_config_t* co
 hal_err_t hal_uart_port_deinit(board_uart_port_t port);
 int hal_uart_read(board_uart_port_t port, uint8_t* buf, size_t max_len);
 int hal_uart_write(board_uart_port_t port, const uint8_t* buf, size_t len);
+hal_err_t hal_uart_flush(board_uart_port_t port);
 const hal_uart_ops_t* hal_uart_esp32_ops(void);
 
 #ifdef __cplusplus

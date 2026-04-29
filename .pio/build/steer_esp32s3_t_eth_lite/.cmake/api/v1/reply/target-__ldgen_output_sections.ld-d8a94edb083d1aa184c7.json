@@ -1,0 +1,310 @@
+{
+	"backtrace" : 4,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target",
+			"__ldgen_create_target",
+			"idf_build_executable",
+			"project"
+		],
+		"files" : 
+		[
+			"C:/Users/uwe/.platformio/packages/framework-espidf/tools/cmake/ldgen.cmake",
+			"C:/Users/uwe/.platformio/packages/framework-espidf/tools/cmake/build.cmake",
+			"C:/Users/uwe/.platformio/packages/framework-espidf/tools/cmake/project.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 3
+			},
+			{
+				"command" : 3,
+				"file" : 3,
+				"line" : 3,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 2,
+				"line" : 973,
+				"parent" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 736,
+				"parent" : 2
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 200,
+				"parent" : 3
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"id" : "__idf_xtensa::@1daaaad7abe597e030f9"
+		},
+		{
+			"id" : "__idf_app_trace::@dd7eb3aa23293586d3b8"
+		},
+		{
+			"id" : "__idf___pio_env::@8ed72ffb2edf9d360e6d"
+		},
+		{
+			"id" : "__idf_unity::@fec746937506b5690992"
+		},
+		{
+			"id" : "__idf_cmock::@38f9eb59693b7394f54c"
+		},
+		{
+			"id" : "__idf_console::@4311ed8d271cc0ee1422"
+		},
+		{
+			"id" : "__idf_esp_driver_cam::@d005630ea6316acc7c7d"
+		},
+		{
+			"id" : "__idf_esp_driver_touch_sens::@834ec88eeea238586f95"
+		},
+		{
+			"id" : "__idf_esp_eth::@68140d310044213ed0bc"
+		},
+		{
+			"id" : "__idf_esp_hid::@15df40e16a5d8775dd9b"
+		},
+		{
+			"id" : "__idf_esp_https_server::@a47490a9e49b7eabdb18"
+		},
+		{
+			"id" : "__idf_protobuf-c::@b14513c4bd859268ec22"
+		},
+		{
+			"id" : "__idf_esp_lcd::@d5a84597e1633c9ab0d3"
+		},
+		{
+			"id" : "__idf_protocomm::@d76d01c8dec06205e1fc"
+		},
+		{
+			"id" : "__idf_esp_local_ctrl::@d6aad58d2946e56208ef"
+		},
+		{
+			"id" : "__idf_wear_levelling::@cb21b0d7c0815cff11c6"
+		},
+		{
+			"id" : "__idf_espcoredump::@718b9a7d55ab42cfc0a3"
+		},
+		{
+			"id" : "__idf_fatfs::@75ac1d9b25dacc8cc9e7"
+		},
+		{
+			"id" : "__idf_mqtt::@c1ab2c6a99226d1f4b56"
+		},
+		{
+			"id" : "__idf_json::@c78a8bdc820334f01148"
+		},
+		{
+			"id" : "__idf_nvs_sec_provider::@06580cba064af97f59fd"
+		},
+		{
+			"id" : "__idf_perfmon::@aac0f647c32bb8f54a67"
+		},
+		{
+			"id" : "__idf_rt::@c044be52929cb104e3c1"
+		},
+		{
+			"id" : "__idf_runtime_buffers::@0d19319b7a98a28069bb"
+		},
+		{
+			"id" : "__idf_transport_uart::@f23e74a8e8dc7700eb3f"
+		},
+		{
+			"id" : "__idf_transport_udp::@8a47f4766a3df86b4e80"
+		},
+		{
+			"id" : "__idf_transport_tcp::@3c2d75f256f574108b2c"
+		},
+		{
+			"id" : "__idf_protocol_nmea::@3f18c2585d02a000e885"
+		},
+		{
+			"id" : "__idf_runtime_snapshot::@f711a56b66388c1caf32"
+		},
+		{
+			"id" : "__idf_gnss_um980::@b9ebe1640fdef2c34301"
+		},
+		{
+			"id" : "__idf_gnss_dual_heading::@287131897b05d658dff7"
+		},
+		{
+			"id" : "__idf_ntrip_client::@e653c30f15334d84c195"
+		},
+		{
+			"id" : "__idf_spiffs::@df881b71474064c86689"
+		},
+		{
+			"id" : "__idf_touch_element::@01c672d9a2e23f1d367f"
+		},
+		{
+			"id" : "__idf_wifi_provisioning::@9d7e7ffe1b15746c1098"
+		},
+		{
+			"id" : "__idf_usb::@4a2418067d0bb57af462"
+		},
+		{
+			"id" : "__idf_board_profiles::@efb3c65b762a182fedc2"
+		},
+		{
+			"id" : "__idf_feature_flags::@bfed20ab1e7653c1608a"
+		},
+		{
+			"id" : "__idf_runtime_components::@b17187429630ca0c8762"
+		},
+		{
+			"id" : "__idf_runtime_stats::@341519e72c3121d317eb"
+		},
+		{
+			"id" : "__idf_runtime_watchdog::@1ba43977775f4979142e"
+		},
+		{
+			"id" : "__idf_runtime_fast::@1a2f286b12e2dbd6f8de"
+		},
+		{
+			"id" : "__idf_runtime::@3ff6d29a4f56e13faddf"
+		},
+		{
+			"id" : "__idf_hal_backend::@8031392be7d493664d74"
+		},
+		{
+			"id" : "__idf_hal_uart::@bdadac99c6e3a0d6ab16"
+		},
+		{
+			"id" : "__idf_protocol_rtcm::@8138f780d5906fe37a8d"
+		},
+		{
+			"id" : "__idf_rtcm_router::@5b1fd9b5a0182e528983"
+		},
+		{
+			"id" : "__idf_aog_navigation_app::@782de6bb94cc4672ed82"
+		},
+		{
+			"id" : "__idf_protocol_aog::@ab3b55c9bd1fd8e30faa"
+		},
+		{
+			"id" : "__idf_imu_bno085::@4781f823defb320f1b09"
+		},
+		{
+			"id" : "__idf_hal_spi::@acdcf79c96610d0dca6c"
+		},
+		{
+			"id" : "__idf_ads1118::@041e920433c24ee72360"
+		},
+		{
+			"id" : "__idf_was_sensor::@dbf5ea2b0ec2cdb28afd"
+		},
+		{
+			"id" : "__idf_hal_gpio::@b8538ca81875bb904218"
+		},
+		{
+			"id" : "__idf_safety_failsafe::@fd5eda01b1f26dc51c65"
+		},
+		{
+			"id" : "__idf_actuator_drv8263h::@060181817a337dd143ef"
+		},
+		{
+			"id" : "__idf_steering_control::@7ddf731804bc5e629b69"
+		},
+		{
+			"id" : "__idf_app_core::@9f36f00044bfa368a6c6"
+		},
+		{
+			"id" : "__idf_aog_steering_app::@3fc2c5a7af3ed187c122"
+		},
+		{
+			"id" : "__idf_main::@7368607ed66887415643"
+		},
+		{
+			"id" : "__idf_cli::@0eb325b70f7e9cc98625"
+		},
+		{
+			"id" : "__idf_hal_eth::@fb07c6f9d0e5b1ebf6b4"
+		},
+		{
+			"id" : "__idf_hal_nvs::@c0c399e143f4fdb054c8"
+		},
+		{
+			"id" : "__idf_hal_ota::@26b8f4c5b4a4bb7642aa"
+		},
+		{
+			"id" : "__idf_hal_time::@b9f70a62e1d0c83642cc"
+		},
+		{
+			"id" : "__idf_hal_reset::@49e07f9b360b7ba156c0"
+		},
+		{
+			"id" : "__idf_runtime_health::@9b7af4e5a61dbe6fd460"
+		},
+		{
+			"id" : "__idf_runtime_queue::@e90ef0d7649dc0ebb759"
+		},
+		{
+			"id" : "__idf_terminal::@abb37cb06f827d0a3e8f"
+		},
+		{
+			"id" : "__idf_transport_eth::@f58baa7052ae8f9b3037"
+		}
+	],
+	"id" : "__ldgen_output_sections.ld::@6890427a1f51a3e7e1df",
+	"name" : "__ldgen_output_sections.ld",
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"name" : "CMake Rules",
+			"sourceIndexes" : 
+			[
+				1,
+				2
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : ".pio/build/steer_esp32s3_t_eth_lite/CMakeFiles/__ldgen_output_sections.ld",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : ".pio/build/steer_esp32s3_t_eth_lite/CMakeFiles/__ldgen_output_sections.ld.rule",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : ".pio/build/steer_esp32s3_t_eth_lite/esp-idf/esp_system/ld/sections.ld.rule",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "UTILITY"
+}

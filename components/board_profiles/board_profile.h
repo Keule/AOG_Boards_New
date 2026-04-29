@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -31,6 +32,19 @@ typedef enum {
     BOARD_UART_GNSS_SECONDARY,
     BOARD_UART_COUNT
 } board_uart_port_t;
+
+/* ---- UART Pin Configuration ---- */
+
+typedef struct {
+    int8_t uart_num;     /* ESP-IDF UART number (UART_NUM_0/1/2) */
+    int8_t tx_pin;       /* GPIO number for TX (-1 if unused) */
+    int8_t rx_pin;       /* GPIO number for RX (-1 if unused) */
+    int8_t rts_pin;      /* GPIO number for RTS (-1 if unused) */
+    int8_t cts_pin;      /* GPIO number for CTS (-1 if unused) */
+} board_uart_pin_config_t;
+
+/* Get pin config for a UART port. Returns NULL if port not available. */
+const board_uart_pin_config_t* board_profile_get_uart_pins(board_uart_port_t port);
 
 /* ---- SPI Bus Roles ---- */
 
