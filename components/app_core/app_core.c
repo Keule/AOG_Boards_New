@@ -175,11 +175,7 @@ void app_core_init(void)
 
         ESP_LOGI(TAG, "Navigation components registered: 10");
 
-        /* Return ONLY for pure navigation — FULL_TEST must continue
-         * to also initialise the steering subsystem below. */
-        if (features & FEATURE_ROLE_NAVIGATION) {
-            return;
-        }
+        return;
     }
 #endif
 
