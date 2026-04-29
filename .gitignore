@@ -1,0 +1,56 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.pioinit
+platformio_override.ini
+
+# Build / binaries
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+*.o
+*.a
+*.so
+*.d
+*.gcda
+*.gcno
+
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# User/local VS Code files
+*.code-workspace
+.history/
+
+# C/C++ tooling
+.ccls-cache/
+compile_commands.json
+.cache/
+
+# Python / scripts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets / local config
+.env
+.env.*
+secrets.*
+credentials.*
+wifi_config.*
