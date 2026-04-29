@@ -1,0 +1,7 @@
+{
+    "name": "protocol_rtcm",
+    "build": {
+        "srcDir": ".",
+        "includeDir": "."
+    }
+}

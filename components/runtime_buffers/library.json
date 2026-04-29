@@ -1,0 +1,7 @@
+{
+    "name": "runtime_buffers",
+    "build": {
+        "srcDir": ".",
+        "includeDir": "."
+    }
+}
