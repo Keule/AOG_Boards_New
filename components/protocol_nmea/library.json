@@ -1,0 +1,7 @@
+{
+    "name": "protocol_nmea",
+    "build": {
+        "srcDir": ".",
+        "includeDir": "."
+    }
+}

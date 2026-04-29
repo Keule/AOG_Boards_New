@@ -13,7 +13,7 @@ void setUp(void)
     ntrip_client_init(&client);
 
     memset(tcp_storage, 0, sizeof(tcp_storage));
-    byte_ring_buffer_init(&tcp_source, tcp_storage, sizeof(tcp_source));
+    byte_ring_buffer_init(&tcp_source, tcp_storage, sizeof(tcp_storage));
     ntrip_client_set_tcp_source(&client, &tcp_source);
 }
 

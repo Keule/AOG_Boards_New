@@ -1,0 +1,7 @@
+{
+    "name": "runtime_snapshot",
+    "build": {
+        "srcDir": ".",
+        "includeDir": "."
+    }
+}
