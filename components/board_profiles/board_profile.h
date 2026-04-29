@@ -55,6 +55,29 @@ typedef enum {
     BOARD_SPI_COUNT
 } board_spi_bus_t;
 
+/* ---- SPI Pin Configuration ---- */
+
+typedef struct {
+    int8_t miso_pin;      /* SPI MISO GPIO (-1 if unused) */
+    int8_t mosi_pin;      /* SPI MOSI GPIO (-1 if unused) */
+    int8_t sclk_pin;      /* SPI CLK GPIO (-1 if unused) */
+    int8_t cs_pin;        /* SPI CS GPIO (-1 if unused) */
+    int8_t intr_pin;      /* Interrupt GPIO (-1 if unused, e.g. W5500 INTR) */
+} board_spi_pin_config_t;
+
+/* Get pin config for an SPI bus. Returns NULL if bus not available. */
+const board_spi_pin_config_t* board_profile_get_spi_pins(board_spi_bus_t bus);
+
+/* ---- Network Port Defaults ---- */
+
+typedef struct {
+    uint16_t aog_udp_port;        /* AOG AgIO UDP port (default: 9999) */
+    uint16_t ntrip_tcp_port;       /* NTRIP caster TCP port (default: 2101) */
+} board_network_ports_t;
+
+/* Get default network port configuration. */
+const board_network_ports_t* board_profile_get_network_ports(void);
+
 /* ---- Feature Flags ---- */
 
 #define BOARD_FEATURE_ETHERNET    (1 << 0)

@@ -1,4 +1,4 @@
-Collected 7 tests (hardware/test_uart_um980_smoke, host/test_byte_ring_buffer, host/test_gnss_um980, host/test_ntrip_client, host/test_rtcm_router, host/test_transport_uart, sim/test_nav_chain)
+Collected 11 tests (hardware/test_ethernet_smoke, hardware/test_uart_um980_smoke, host/test_byte_ring_buffer, host/test_gnss_um980, host/test_hal_eth, host/test_ntrip_client, host/test_rtcm_router, host/test_transport_tcp, host/test_transport_uart, host/test_transport_udp, sim/test_nav_chain)
 
 Processing sim/test_nav_chain in native environment
 --------------------------------------------------------------------------------
@@ -16,7 +16,25 @@ test/sim/test_nav_chain/test_nav_chain.c:312:test_rtcm_router_distributes_to_bot
 5 Tests 0 Failures 0 Ignored 
 OK
 
-------------- native:sim/test_nav_chain [PASSED] Took 1.10 seconds -------------
+------------- native:sim/test_nav_chain [PASSED] Took 0.92 seconds -------------
+
+Processing hardware/test_ethernet_smoke in native environment
+--------------------------------------------------------------------------------
+Building...
+
+
+Testing...
+test/hardware/test_ethernet_smoke/test_ethernet_smoke.c:32:test_ethernet_init:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+test/hardware/test_ethernet_smoke/test_ethernet_smoke.c:43:test_link_ip_status_readable:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+test/hardware/test_ethernet_smoke/test_ethernet_smoke.c:58:test_udp_socket_startable:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+test/hardware/test_ethernet_smoke/test_ethernet_smoke.c:73:test_tcp_socket_skeleton_startable:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+test/hardware/test_ethernet_smoke/test_ethernet_smoke.c:78:test_nmea_checksum_valid:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+
+-----------------------
+5 Tests 0 Failures 5 Ignored 
+OK
+
+-------- native:hardware/test_ethernet_smoke [PASSED] Took 0.90 seconds --------
 
 Processing hardware/test_uart_um980_smoke in native environment
 --------------------------------------------------------------------------------
@@ -34,7 +52,29 @@ test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:290:test_nmea_checks
 5 Tests 0 Failures 5 Ignored 
 OK
 
-------- native:hardware/test_uart_um980_smoke [PASSED] Took 0.86 seconds -------
+------- native:hardware/test_uart_um980_smoke [PASSED] Took 0.85 seconds -------
+
+Processing host/test_transport_udp in native environment
+--------------------------------------------------------------------------------
+Building...
+
+
+Testing...
+test/host/test_transport_udp/test_transport_udp.c:221:test_udp_init_binds_and_succeeds:PASS
+test/host/test_transport_udp/test_transport_udp.c:222:test_udp_set_hal_ops:PASS
+test/host/test_transport_udp/test_transport_udp.c:223:test_udp_rx_queue_filled:PASS
+test/host/test_transport_udp/test_transport_udp.c:224:test_udp_tx_queue_drained:PASS
+test/host/test_transport_udp/test_transport_udp.c:225:test_udp_partial_write_no_data_loss:PASS
+test/host/test_transport_udp/test_transport_udp.c:226:test_udp_diagnostics:PASS
+test/host/test_transport_udp/test_transport_udp.c:227:test_udp_reset:PASS
+test/host/test_transport_udp/test_transport_udp.c:228:test_udp_null_safety:PASS
+test/host/test_transport_udp/test_transport_udp.c:229:test_udp_contains_no_aog_logic:PASS
+
+-----------------------
+9 Tests 0 Failures 0 Ignored 
+OK
+
+---------- native:host/test_transport_udp [PASSED] Took 0.87 seconds ----------
 
 Processing host/test_ntrip_client in native environment
 --------------------------------------------------------------------------------
@@ -63,7 +103,53 @@ test/host/test_ntrip_client/test_ntrip_client.c:235:test_service_step_not_starte
 16 Tests 0 Failures 0 Ignored 
 OK
 
------------ native:host/test_ntrip_client [PASSED] Took 0.90 seconds -----------
+----------- native:host/test_ntrip_client [PASSED] Took 0.89 seconds -----------
+
+Processing host/test_transport_tcp in native environment
+--------------------------------------------------------------------------------
+Building...
+
+
+Testing...
+test/host/test_transport_tcp/test_transport_tcp.c:269:test_tcp_init_succeeds:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:270:test_tcp_set_hal_ops_and_connect:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:271:test_tcp_disconnect:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:272:test_tcp_rx_buffer_filled:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:273:test_tcp_tx_buffer_drained:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:274:test_tcp_partial_write_no_data_loss:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:275:test_tcp_hal_failure_preserves_data:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:276:test_tcp_diagnostics:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:277:test_tcp_reset:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:278:test_tcp_null_safety:PASS
+test/host/test_transport_tcp/test_transport_tcp.c:279:test_tcp_contains_no_ntrip_logic:PASS
+
+-----------------------
+11 Tests 0 Failures 0 Ignored 
+OK
+
+---------- native:host/test_transport_tcp [PASSED] Took 0.87 seconds ----------
+
+Processing host/test_hal_eth in native environment
+--------------------------------------------------------------------------------
+Building...
+
+
+Testing...
+test/host/test_hal_eth/test_hal_eth.c:101:test_hal_eth_init_with_null_ops_fails:PASS
+test/host/test_hal_eth/test_hal_eth.c:102:test_hal_eth_get_controller:PASS
+test/host/test_hal_eth/test_hal_eth.c:103:test_hal_eth_get_status_null:PASS
+test/host/test_hal_eth/test_hal_eth.c:104:test_hal_eth_get_status_not_initialized:PASS
+test/host/test_hal_eth/test_hal_eth.c:105:test_hal_eth_esp32_ops_returns_non_null:PASS
+test/host/test_hal_eth/test_hal_eth.c:106:test_hal_eth_init_and_status:PASS
+test/host/test_hal_eth/test_hal_eth.c:107:test_hal_eth_is_connected_stub:PASS
+test/host/test_hal_eth/test_hal_eth.c:108:test_hal_eth_deinit:PASS
+test/host/test_hal_eth/test_hal_eth.c:109:test_hal_eth_status_has_mac_field:PASS
+
+-----------------------
+9 Tests 0 Failures 0 Ignored 
+OK
+
+------------- native:host/test_hal_eth [PASSED] Took 0.86 seconds -------------
 
 Processing host/test_transport_uart in native environment
 --------------------------------------------------------------------------------
@@ -94,7 +180,7 @@ test/host/test_transport_uart/test_transport_uart.c:614:test_two_instances_indep
 18 Tests 0 Failures 0 Ignored 
 OK
 
----------- native:host/test_transport_uart [PASSED] Took 0.93 seconds ----------
+---------- native:host/test_transport_uart [PASSED] Took 0.92 seconds ----------
 
 Processing host/test_byte_ring_buffer in native environment
 --------------------------------------------------------------------------------
@@ -126,7 +212,7 @@ test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:243:test_overflow_count_
 19 Tests 0 Failures 0 Ignored 
 OK
 
---------- native:host/test_byte_ring_buffer [PASSED] Took 0.88 seconds ---------
+--------- native:host/test_byte_ring_buffer [PASSED] Took 0.85 seconds ---------
 
 Processing host/test_rtcm_router in native environment
 --------------------------------------------------------------------------------
@@ -178,37 +264,53 @@ test/host/test_gnss_um980/test_gnss_um980.c:312:test_service_step_null_does_not_
 11 Tests 0 Failures 0 Ignored 
 OK
 
------------- native:host/test_gnss_um980 [PASSED] Took 0.91 seconds ------------
+------------ native:host/test_gnss_um980 [PASSED] Took 0.87 seconds ------------
 
 =================================== SUMMARY ===================================
 Environment               Test                            Status    Duration
 ------------------------  ------------------------------  --------  ------------
 nav_esp32_t_eth_lite      sim/test_nav_chain              SKIPPED
+nav_esp32_t_eth_lite      hardware/test_ethernet_smoke    SKIPPED
 nav_esp32_t_eth_lite      hardware/test_uart_um980_smoke  SKIPPED
+nav_esp32_t_eth_lite      host/test_transport_udp         SKIPPED
 nav_esp32_t_eth_lite      host/test_ntrip_client          SKIPPED
+nav_esp32_t_eth_lite      host/test_transport_tcp         SKIPPED
+nav_esp32_t_eth_lite      host/test_hal_eth               SKIPPED
 nav_esp32_t_eth_lite      host/test_transport_uart        SKIPPED
 nav_esp32_t_eth_lite      host/test_byte_ring_buffer      SKIPPED
 nav_esp32_t_eth_lite      host/test_rtcm_router           SKIPPED
 nav_esp32_t_eth_lite      host/test_gnss_um980            SKIPPED
 steer_esp32s3_t_eth_lite  sim/test_nav_chain              SKIPPED
+steer_esp32s3_t_eth_lite  hardware/test_ethernet_smoke    SKIPPED
 steer_esp32s3_t_eth_lite  hardware/test_uart_um980_smoke  SKIPPED
+steer_esp32s3_t_eth_lite  host/test_transport_udp         SKIPPED
 steer_esp32s3_t_eth_lite  host/test_ntrip_client          SKIPPED
+steer_esp32s3_t_eth_lite  host/test_transport_tcp         SKIPPED
+steer_esp32s3_t_eth_lite  host/test_hal_eth               SKIPPED
 steer_esp32s3_t_eth_lite  host/test_transport_uart        SKIPPED
 steer_esp32s3_t_eth_lite  host/test_byte_ring_buffer      SKIPPED
 steer_esp32s3_t_eth_lite  host/test_rtcm_router           SKIPPED
 steer_esp32s3_t_eth_lite  host/test_gnss_um980            SKIPPED
 full_test_esp32s3         sim/test_nav_chain              SKIPPED
+full_test_esp32s3         hardware/test_ethernet_smoke    SKIPPED
 full_test_esp32s3         hardware/test_uart_um980_smoke  SKIPPED
+full_test_esp32s3         host/test_transport_udp         SKIPPED
 full_test_esp32s3         host/test_ntrip_client          SKIPPED
+full_test_esp32s3         host/test_transport_tcp         SKIPPED
+full_test_esp32s3         host/test_hal_eth               SKIPPED
 full_test_esp32s3         host/test_transport_uart        SKIPPED
 full_test_esp32s3         host/test_byte_ring_buffer      SKIPPED
 full_test_esp32s3         host/test_rtcm_router           SKIPPED
 full_test_esp32s3         host/test_gnss_um980            SKIPPED
-native                    sim/test_nav_chain              PASSED    00:00:01.095
-native                    hardware/test_uart_um980_smoke  SKIPPED   00:00:00.861
+native                    sim/test_nav_chain              PASSED    00:00:00.924
+native                    hardware/test_ethernet_smoke    SKIPPED   00:00:00.896
+native                    hardware/test_uart_um980_smoke  SKIPPED   00:00:00.853
+native                    host/test_transport_udp         PASSED    00:00:00.868
 native                    host/test_ntrip_client          PASSED    00:00:00.895
-native                    host/test_transport_uart        PASSED    00:00:00.933
-native                    host/test_byte_ring_buffer      PASSED    00:00:00.877
-native                    host/test_rtcm_router           PASSED    00:00:00.895
-native                    host/test_gnss_um980            PASSED    00:00:00.910
-============ 89 test cases: 5 skipped, 84 succeeded in 00:00:06.466 ============
+native                    host/test_transport_tcp         PASSED    00:00:00.872
+native                    host/test_hal_eth               PASSED    00:00:00.858
+native                    host/test_transport_uart        PASSED    00:00:00.916
+native                    host/test_byte_ring_buffer      PASSED    00:00:00.853
+native                    host/test_rtcm_router           PASSED    00:00:00.894
+native                    host/test_gnss_um980            PASSED    00:00:00.870
+========== 123 test cases: 10 skipped, 113 succeeded in 00:00:09.698 ==========

@@ -115,6 +115,50 @@ const board_uart_pin_config_t* board_profile_get_uart_pins(board_uart_port_t por
 #endif
 }
 
+const board_spi_pin_config_t* board_profile_get_spi_pins(board_spi_bus_t bus)
+{
+    if (bus < 0 || bus >= BOARD_SPI_COUNT) {
+        return NULL;
+    }
+    if (!board_profile_has_spi(bus)) {
+        return NULL;
+    }
+
+#if defined(CONFIG_BOARD_ESP32)
+    /* LilyGO T-Eth Lite ESP32 (classic) — internal MAC RMII, no SPI for ETH */
+    (void)bus;
+    return NULL;
+
+#elif defined(CONFIG_BOARD_ESP32S3)
+    /* LilyGO T-Eth Lite ESP32-S3 — W5500 via SPI */
+    static const board_spi_pin_config_t esp32s3_spi[BOARD_SPI_COUNT] = {
+        [BOARD_SPI_ETHERNET] = {
+            .miso_pin = 13,
+            .mosi_pin = 11,
+            .sclk_pin = 12,
+            .cs_pin   = 10,
+            .intr_pin = 4
+        },
+        /* BOARD_SPI_DEVICE and BOARD_SPI_STORAGE: no pins assigned */
+    };
+    return &esp32s3_spi[bus];
+
+#else
+    (void)bus;
+    return NULL;
+#endif
+}
+
+const board_network_ports_t* board_profile_get_network_ports(void)
+{
+    /* Same defaults for all boards */
+    static const board_network_ports_t s_ports = {
+        .aog_udp_port    = 9999,
+        .ntrip_tcp_port  = 2101,
+    };
+    return &s_ports;
+}
+
 unsigned int board_profile_get_features(void)
 {
     unsigned int features = 0;

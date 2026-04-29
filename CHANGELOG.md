@@ -1,5 +1,86 @@
 # CHANGELOG
 
+## NAV-NTRIP-001 — Produktiver NTRIP-Client auf generischem TCP-Transport
+
+### NTRIP-Konfiguration
+- **`ntrip_client_config_t`** Struktur: `mountpoint`, `username`, `password`, `user_agent`, `reconnect_initial_ms`, `reconnect_max_ms`, `response_timeout_ms`
+- **`ntrip_client_config_set_defaults()`** setzt sichere Default-Werte
+- Keine Secrets hart im Code — Konfiguration wird zur Laufzeit übergeben
+- NVS-Vorbereitung: Struktur ist direkt aus NVS befüllbar
+
+### State Machine produktiv
+- **7 Zustände**: `IDLE → CONNECTING → SEND_REQUEST → WAIT_RESPONSE → STREAMING → ERROR → RETRY_WAIT`
+- Altes Skeleton (simulierte Timeouts, `AUTHENTICATING`/`CONNECTED` States) vollständig ersetzt
+- **Nonblocking** — alle Zustandswechsel in `service_step()`
+- Disconnect-Erkennung in allen aktiven Zuständen
+
+### HTTP/NTRIP-Request
+- Generiert korrekten Request: `GET /<mountpoint> HTTP/1.0` + `User-Agent`, `Authorization: Basic`, `Ntrip-Version`, `Connection: close`
+- **Base64-Encoding** für Basic Auth (inline, RFC 4648, keine externe Lib)
+- Request wird über `transport_tcp.tx_write()` gesendet (kein direkter Socket-Zugriff)
+
+### Response-Parsing
+- Akzeptiert: `ICY 200 OK`, `HTTP/1.0 200`, `HTTP/1.1 200` → `STREAMING`
+- Fehlerfälle: `401` (Unauthorized), `403` (Forbidden), `404` (Not Found) → `ERROR`
+- Timeout-Erkennung: konfigurierbar via `response_timeout_ms`
+- Daten nach HTTP-Headern (Inline-RTCM) werden direkt an `rtcm_buffer` weitergeleitet
+
+### RTCM-Stream
+- Im `STREAMING`-Zustand: `transport_tcp.rx_buffer` → `ntrip_client.rtcm_buffer`
+- Keine RTCM-Decodierung, kein Routing, keine UART-Ausgabe im ntrip_client
+- Keine RTCM-Daten in nicht-verbundenen Zuständen
+
+### Reconnect / Backoff
+- **Exponentieller Backoff**: `initial_ms` → ×2 → ... → `max_ms` (default: 1s → 2s → 4s → ... → 60s)
+- Backoff wird bei erfolgreicher Verbindung zurückgesetzt
+- `reconnect_count` wird pro Retry inkrementiert, bei `STREAMING` zurückgesetzt
+
+### API-Änderungen (Breaking)
+- `ntrip_client_init()`: Signatur unverändert (nur Zustand zurücksetzen)
+- **NEU**: `ntrip_client_configure(client, config)` — setzt Konfiguration
+- **NEU**: `ntrip_client_set_transport(client, tcp)` — setzt transport_tcp (ersetzt `set_tcp_source`)
+- **NEU**: `ntrip_client_stop()` — Übergang zu IDLE
+- **NEU**: `ntrip_client_get_last_error_code()` — HTTP-Status oder interner Fehlercode
+- **ENTFALLEN**: `ntrip_client_set_tcp_source()` — ersetzt durch `set_transport`
+- **ENTFALLEN**: `NTRIP_STATE_AUTHENTICATING`, `NTRIP_STATE_CONNECTED`, `NTRIP_STATE_RECONNECT` — ersetzt durch produktive States
+
+### Neue Tests (37 Tests)
+- Request-Generierung: Mountpoint, HTTP/1.0, User-Agent, Ntrip-Version, Connection: close
+- Basic Auth: korrekte Base64-Kodierung, leeres Passwort, kein Auth ohne Username, Custom User-Agent
+- State Transitions: alle 7 States, gültige/ungültige Übergänge, Start/Stop
+- Response-Parsing: ICY 200 → STREAMING, HTTP/1.0 200 → STREAMING, HTTP/1.1 200 → STREAMING
+- HTTP-Fehler: 401 → ERROR, 403 → ERROR, 404 → ERROR, Error → Retry
+- RTCM-Forwarding: Bytes landen in rtcm_buffer, Inline-RTCM nach Headers, kein RTCM wenn nicht verbunden
+- Backoff: Reconnect nach Error, exponentielles Verdoppeln, Cap bei max_backoff
+- Timeout: connect_timeout → ERROR
+- Fehlerfälle: kein Transport → ERROR, keine Config → ERROR, Disconnect im Streaming
+- Edge Cases: NULL-Safety für alle API-Funktionen
+
+### Test Results
+- **37 NTRIP-Tests** + bestehende Tests = alle grün
+- `pio test -e native` — 0 failures
+- ADR-Checks: 4/4 grün
+
+### Files Modified
+| File | Change |
+|------|--------|
+| `components/ntrip_client/ntrip_client.h` | Komplett neu: Config-Struct, 7 States, transport_tcp Integration, neue API |
+| `components/ntrip_client/ntrip_client.c` | Komplett neu: HTTP-Request-Builder, Base64, Response-Parser, produktive State Machine |
+| `components/ntrip_client/CMakeLists.txt` | `PRIV_REQUIRES transport_tcp` hinzugefügt |
+| `test/host/test_ntrip_client/test_ntrip_client.c` | Komplett neu: 37 Tests mit Fake TCP HAL |
+| `test/sim/test_nav_chain/test_nav_chain.c` | Aktualisiert für neue ntrip_client API (transport_tcp statt raw ring buffer) |
+| `docs/hardware/nav-ntrip.md` | **NEU** — Setup, Konfiguration, State Machine, Test-Verfahren, Fehlerfälle |
+
+### Files NOT Changed (as required)
+- Keine AOG-PGN-Änderungen
+- Keine Steering-Änderungen
+- Kein RTCM-Routing im ntrip_client
+- Keine UART-Ausgabe im ntrip_client
+- Keine Socket-I/O in task_fast
+- transport_tcp enthält weiterhin keine NTRIP-Logik
+
+---
+
 ## NAV-IO-001 Nacharbeit — UART/HAL Produktionshärtung
 
 ### UART Config Hardened

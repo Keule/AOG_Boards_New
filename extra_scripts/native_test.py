@@ -26,7 +26,11 @@ COMPONENTS = [
     "runtime_snapshot",    # snapshot_buffer.c/h
     "hal_backend",         # hal_backend.c/h (no ESP-IDF dependency)
     "hal_uart",            # hal_uart.c/h (has ESP_PLATFORM guards, stubs for native)
+    "hal_eth",             # hal_eth.c/h (has ESP_PLATFORM guards, stubs for native)
+    "board_profiles",      # board_profile.c/h (needed by all HAL and transport)
     "transport_uart",      # transport_uart.c/h (needs hal_uart stubs)
+    "transport_tcp",       # transport_tcp.c/h (injectable HAL ops, stubs for native)
+    "transport_udp",       # transport_udp.c/h (injectable HAL ops, stubs for native)
     "protocol_nmea",       # nmea_parser.c/h
     "protocol_rtcm",       # rtcm_passthrough.c/h
     "ntrip_client",        # ntrip_client.c/h
