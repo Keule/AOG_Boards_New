@@ -144,12 +144,14 @@ void ntrip_client_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         return;
     }
 
-    /* Fix initial timestamp (ntrip_client_start uses 0) */
-    if (client->last_state_change_us == 0 && timestamp_us > 0) {
-        client->last_state_change_us = timestamp_us;
+    uint64_t elapsed;
+    if (client->last_state_change_us == 0) {
+        /* No previous timestamp recorded — treat elapsed as the full
+         * timestamp since epoch (skeleton started at t=0). */
+        elapsed = timestamp_us;
+    } else {
+        elapsed = timestamp_us - client->last_state_change_us;
     }
-
-    uint64_t elapsed = timestamp_us - client->last_state_change_us;
 
     /* ---- Skeleton state progression (simulated TCP handshake) ---- */
     switch (client->state) {
@@ -190,11 +192,13 @@ void ntrip_client_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         /* Skeleton: auto-retry after error (with backoff) */
         if (elapsed >= NTRIP_SKELETON_AUTHENTICATING_TIMEOUT_US) {
             ntrip_client_transition(client, NTRIP_STATE_RECONNECT, timestamp_us);
+            /* RECONNECT immediately transitions to CONNECTING */
+            ntrip_client_transition(client, NTRIP_STATE_CONNECTING, timestamp_us);
         }
         break;
 
     case NTRIP_STATE_RECONNECT:
-        /* Skeleton: immediately retry */
+        /* Skeleton: immediately retry (fallback — normally handled above) */
         ntrip_client_transition(client, NTRIP_STATE_CONNECTING, timestamp_us);
         break;
 

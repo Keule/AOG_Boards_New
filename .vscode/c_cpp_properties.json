@@ -8,7 +8,7 @@
         {
             "name": "PlatformIO",
             "includePath": [
-                "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/src",
+                "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/main",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/esp32s3/include",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/include",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/deprecated_include",
@@ -110,7 +110,7 @@
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/unity/include",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/unity/unity/src",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/cmock/CMock/src",
-                "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/console",
+                "C:/Users/uwe/.platformio/packages/framework-espidf/components/console",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/esp_driver_pcnt/include",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/esp_driver_mcpwm/include",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/esp_driver_ana_cmpr/include",
@@ -217,7 +217,6 @@
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/actuator_drv8263h",
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/aog_steering_app",
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/app_core",
-                "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/app_console",
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/cli",
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/hal_eth",
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/hal_nvs",
@@ -226,13 +225,14 @@
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/hal_time",
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/runtime_health",
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/runtime_queue",
+                "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/terminal",
                 "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/transport_eth",
                 ""
             ],
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
-                    "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/src",
+                    "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/main",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/esp32s3/include",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/include",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/deprecated_include",
@@ -334,7 +334,7 @@
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/unity/include",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/unity/unity/src",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/cmock/CMock/src",
-                    "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/console",
+                    "C:/Users/uwe/.platformio/packages/framework-espidf/components/console",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/esp_driver_pcnt/include",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/esp_driver_mcpwm/include",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/esp_driver_ana_cmpr/include",
@@ -441,7 +441,6 @@
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/actuator_drv8263h",
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/aog_steering_app",
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/app_core",
-                    "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/app_console",
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/cli",
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/hal_eth",
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/hal_nvs",
@@ -450,6 +449,7 @@
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/hal_time",
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/runtime_health",
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/runtime_queue",
+                    "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/terminal",
                     "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/components/transport_eth",
                     ""
                 ]
