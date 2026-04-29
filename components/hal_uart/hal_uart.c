@@ -1,13 +1,13 @@
 #include "hal_uart.h"
 
-#if defined(ESP_PLATFORM) && !defined(UNIT_TEST)
+#if defined(ESP_PLATFORM)
 #include "driver/uart.h"
 #include "esp_log.h"
 #endif
 
 static const hal_uart_ops_t* s_uart_ops = NULL;
 
-#if defined(ESP_PLATFORM) && !defined(UNIT_TEST)
+#if defined(ESP_PLATFORM)
 /* Track which UART ports have been initialized (by board_uart_port_t index) */
 static bool s_port_initialized[BOARD_UART_COUNT] = { false };
 
@@ -15,6 +15,8 @@ static const char* TAG = "HAL_UART";
 #define ESP32_UART_RX_BUF_SIZE  1024
 #define ESP32_UART_TX_BUF_SIZE   512
 #endif
+
+/* ---- Abstract HAL API ---- */
 
 hal_err_t hal_uart_init(const hal_uart_ops_t* ops)
 {
@@ -50,6 +52,34 @@ hal_err_t hal_uart_port_deinit(board_uart_port_t port)
     return s_uart_ops->deinit(port);
 }
 
+hal_err_t hal_uart_flush(board_uart_port_t port)
+{
+    if (s_uart_ops == NULL || s_uart_ops->read == NULL) {
+        return HAL_ERR_NOT_INITIALIZED;
+    }
+    /* Drain: read and discard all pending RX data */
+    uint8_t tmp[64];
+    int total_drained = 0;
+    while (total_drained < 8192) {  /* Safety limit to prevent infinite loop */
+        int n = s_uart_ops->read(port, tmp, sizeof(tmp));
+        if (n <= 0) break;
+        total_drained += n;
+    }
+    return HAL_OK;
+}
+
+hal_err_t hal_uart_port_reset(board_uart_port_t port, const hal_uart_config_t* config)
+{
+    if (config == NULL) {
+        return HAL_ERR_INVALID_PARAM;
+    }
+    hal_err_t err = hal_uart_port_deinit(port);
+    if (err != HAL_OK && err != HAL_ERR_NOT_INITIALIZED) {
+        return err;
+    }
+    return hal_uart_port_init(port, config);
+}
+
 int hal_uart_read(board_uart_port_t port, uint8_t* buf, size_t max_len)
 {
     if (s_uart_ops == NULL || s_uart_ops->read == NULL) {
@@ -66,20 +96,47 @@ int hal_uart_write(board_uart_port_t port, const uint8_t* buf, size_t len)
     return s_uart_ops->write(port, buf, len);
 }
 
-hal_err_t hal_uart_flush(board_uart_port_t port)
+/* ==========================================================================
+ * ESP32 Productive Implementations
+ *
+ * Full UART parametrisation via uart_config_t + uart_param_config().
+ * No hardware flow control, deterministic configuration for UM980 GNSS.
+ * ========================================================================== */
+
+#if defined(ESP_PLATFORM)
+
+/* Map hal_uart_config_t data_bits to ESP-IDF uart_word_length_t */
+static int map_data_bits(uint8_t bits)
 {
-    /* Flush is optional — if ops has no flush, return not-supported */
-    if (s_uart_ops == NULL) {
-        return HAL_ERR_NOT_INITIALIZED;
+    switch (bits) {
+        case 5: return UART_DATA_5_BITS;
+        case 6: return UART_DATA_6_BITS;
+        case 7: return UART_DATA_7_BITS;
+        case 8:
+        default: return UART_DATA_8_BITS;
     }
-    /* No flush op in current vtable — use read-drain on ESP32 side */
-    (void)port;
-    return HAL_ERR_NOT_SUPPORTED;
 }
 
-/* ---- ESP32 Implementations ---- */
+/* Map hal_uart_config_t stop_bits to ESP-IDF uart_stop_bits_t */
+static int map_stop_bits(uint8_t bits)
+{
+    switch (bits) {
+        case 2: return UART_STOP_BITS_2;
+        case 1:
+        default: return UART_STOP_BITS_1;
+    }
+}
 
-#if defined(ESP_PLATFORM) && !defined(UNIT_TEST)
+/* Map hal_uart_config_t parity to ESP-IDF uart_parity_t */
+static int map_parity(uint8_t parity)
+{
+    switch (parity) {
+        case 1: return UART_PARITY_EVEN;
+        case 2: return UART_PARITY_ODD;
+        case 0:
+        default: return UART_PARITY_DISABLE;
+    }
+}
 
 static hal_err_t esp32_uart_init(board_uart_port_t port, const hal_uart_config_t* config)
 {
@@ -101,7 +158,24 @@ static hal_err_t esp32_uart_init(board_uart_port_t port, const hal_uart_config_t
         return HAL_OK;
     }
 
-    esp_err_t err = uart_driver_install(
+    /* Step 1: Full UART parametrisation */
+    uart_config_t uart_cfg = {
+        .baud_rate  = (int)config->baudrate,
+        .data_bits  = map_data_bits(config->data_bits),
+        .parity     = map_parity(config->parity),
+        .stop_bits  = map_stop_bits(config->stop_bits),
+        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    esp_err_t err = uart_param_config(uart_num, &uart_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "uart_param_config(%d) failed: 0x%x", uart_num, (unsigned)err);
+        return HAL_ERR_IO;
+    }
+
+    /* Step 2: Install UART driver */
+    err = uart_driver_install(
         uart_num,
         ESP32_UART_RX_BUF_SIZE,
         ESP32_UART_TX_BUF_SIZE,
@@ -112,6 +186,7 @@ static hal_err_t esp32_uart_init(board_uart_port_t port, const hal_uart_config_t
         return HAL_ERR_IO;
     }
 
+    /* Step 3: Configure GPIO pins */
     err = uart_set_pin(
         uart_num,
         pins->tx_pin,
@@ -125,19 +200,15 @@ static hal_err_t esp32_uart_init(board_uart_port_t port, const hal_uart_config_t
         return HAL_ERR_IO;
     }
 
-    err = uart_set_baudrate(uart_num, config->baudrate);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "uart_set_baudrate(%d, %lu) failed: 0x%x",
-                 uart_num, (unsigned long)config->baudrate, (unsigned)err);
-        uart_driver_delete(uart_num);
-        return HAL_ERR_IO;
-    }
-
     s_port_initialized[port] = true;
 
-    ESP_LOGI(TAG, "UART port %d (num=%d) initialized: tx=%d rx=%d baud=%lu",
-             (int)port, uart_num, pins->tx_pin, pins->rx_pin,
-             (unsigned long)config->baudrate);
+    ESP_LOGI(TAG, "UART port %d (num=%d) initialized: tx=%d rx=%d baud=%lu %d%c%s",
+             (int)port, uart_num,
+             pins->tx_pin, pins->rx_pin,
+             (unsigned long)config->baudrate,
+             config->data_bits,
+             config->parity == 0 ? 'N' : (config->parity == 1 ? 'E' : 'O'),
+             config->stop_bits == 2 ? "2" : "1");
 
     return HAL_OK;
 }
@@ -155,6 +226,8 @@ static hal_err_t esp32_uart_deinit(board_uart_port_t port)
 
     uart_driver_delete(pins->uart_num);
     s_port_initialized[port] = false;
+
+    ESP_LOGI(TAG, "UART port %d (num=%d) deinitialized", (int)port, pins->uart_num);
 
     return HAL_OK;
 }
@@ -190,10 +263,10 @@ static int esp32_uart_write(board_uart_port_t port, const uint8_t* buf, size_t l
     if (written < 0) {
         return -1;
     }
-    return (int)len;
+    return written;  /* Return ACTUAL bytes written (may be < len) */
 }
 
-#else /* !ESP_PLATFORM || UNIT_TEST — stub implementations for host tests */
+#else /* !ESP_PLATFORM — stub implementations for host/native tests */
 
 static hal_err_t esp32_uart_init(board_uart_port_t port, const hal_uart_config_t* config)
 {
@@ -219,7 +292,7 @@ static int esp32_uart_write(board_uart_port_t port, const uint8_t* buf, size_t l
     return 0;
 }
 
-#endif /* ESP_PLATFORM && !UNIT_TEST */
+#endif /* ESP_PLATFORM */
 
 static const hal_uart_ops_t s_esp32_uart_ops = {
     .init   = esp32_uart_init,

@@ -15,12 +15,12 @@ extern "C" {
 
 typedef struct {
     uint32_t baudrate;
-    uint8_t  data_bits;
-    uint8_t  stop_bits;
-    uint8_t  parity;    /* 0=none, 1=even, 2=odd */
+    uint8_t  data_bits;   /* 5, 6, 7, or 8 */
+    uint8_t  stop_bits;   /* 1 or 2 */
+    uint8_t  parity;      /* 0=none, 1=even, 2=odd */
 } hal_uart_config_t;
 
-/* Default config macro */
+/* Default config macro: 115200 baud, 8N1 */
 #define HAL_UART_CONFIG_DEFAULT() { \
     .baudrate  = 115200,            \
     .data_bits = 8,                 \
@@ -35,7 +35,7 @@ typedef struct {
     hal_err_t (*deinit)(board_uart_port_t port);
     /* Nonblocking read: returns number of bytes read (0 if none available) */
     int (*read)(board_uart_port_t port, uint8_t* buf, size_t max_len);
-    /* Nonblocking write: returns number of bytes written */
+    /* Nonblocking write: returns number of bytes actually written (may be < len) */
     int (*write)(board_uart_port_t port, const uint8_t* buf, size_t len);
 } hal_uart_ops_t;
 
@@ -45,9 +45,21 @@ hal_err_t hal_uart_init(const hal_uart_ops_t* ops);
 hal_err_t hal_uart_deinit(void);
 hal_err_t hal_uart_port_init(board_uart_port_t port, const hal_uart_config_t* config);
 hal_err_t hal_uart_port_deinit(board_uart_port_t port);
+
+/* Flush: drain all pending RX data from the HAL.
+ * Reads and discards bytes until the port reports empty.
+ * Safe to call at any time after hal_uart_init(). */
+hal_err_t hal_uart_flush(board_uart_port_t port);
+
+/* Reset: deinitialize then reinitialize a port.
+ * Useful for error recovery without full hal_uart_deinit+init cycle.
+ * Config must be provided since the port state is fully cleared. */
+hal_err_t hal_uart_port_reset(board_uart_port_t port, const hal_uart_config_t* config);
+
 int hal_uart_read(board_uart_port_t port, uint8_t* buf, size_t max_len);
 int hal_uart_write(board_uart_port_t port, const uint8_t* buf, size_t len);
-hal_err_t hal_uart_flush(board_uart_port_t port);
+
+/* Get the ESP32 HAL ops struct (stubs on host, productive on ESP32). */
 const hal_uart_ops_t* hal_uart_esp32_ops(void);
 
 #ifdef __cplusplus

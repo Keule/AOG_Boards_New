@@ -1,131 +1,214 @@
-Verbosity level can be increased via `-v, -vv, or -vvv` option
-Collected 6 tests
+Collected 7 tests (hardware/test_uart_um980_smoke, host/test_byte_ring_buffer, host/test_gnss_um980, host/test_ntrip_client, host/test_rtcm_router, host/test_transport_uart, sim/test_nav_chain)
 
 Processing sim/test_nav_chain in native environment
 --------------------------------------------------------------------------------
 Building...
+
+
 Testing...
-test/sim/test_nav_chain/test_nav_chain.c:300: test_primary_rx_gga_gives_fix	[PASSED]
-test/sim/test_nav_chain/test_nav_chain.c:303: test_secondary_rx_gga_gives_fix	[PASSED]
-test/sim/test_nav_chain/test_nav_chain.c:306: test_both_gnss_instances_independent	[PASSED]
-test/sim/test_nav_chain/test_nav_chain.c:309: test_ntrip_connects_and_receives_tcp_data	[PASSED]
-test/sim/test_nav_chain/test_nav_chain.c:312: test_rtcm_router_distributes_to_both_uart_tx	[PASSED]
-------------- native:sim/test_nav_chain [PASSED] Took 0.96 seconds -------------
+test/sim/test_nav_chain/test_nav_chain.c:300:test_primary_rx_gga_gives_fix:PASS
+test/sim/test_nav_chain/test_nav_chain.c:303:test_secondary_rx_gga_gives_fix:PASS
+test/sim/test_nav_chain/test_nav_chain.c:306:test_both_gnss_instances_independent:PASS
+test/sim/test_nav_chain/test_nav_chain.c:309:test_ntrip_connects_and_receives_tcp_data:PASS
+test/sim/test_nav_chain/test_nav_chain.c:312:test_rtcm_router_distributes_to_both_uart_tx:PASS
+
+-----------------------
+5 Tests 0 Failures 0 Ignored 
+OK
+
+------------- native:sim/test_nav_chain [PASSED] Took 1.10 seconds -------------
 
 Processing hardware/test_uart_um980_smoke in native environment
 --------------------------------------------------------------------------------
 Building...
+
+
 Testing...
-test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:116: test_uart_init_both_ports: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
-test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:153: test_rx_receives_nmea: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
-test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:189: test_tx_accepts_rtcm: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
-test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:228: test_sustained_no_crash: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
-test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:290: test_nmea_checksum_valid: Requires physical hardware \xE2\x80\x94 implement for on-target build	[SKIPPED]
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:116:test_uart_init_both_ports:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:153:test_rx_receives_nmea:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:189:test_tx_accepts_rtcm:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:228:test_sustained_no_crash:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+test/hardware/test_uart_um980_smoke/test_uart_um980_smoke.c:290:test_nmea_checksum_valid:IGNORE: Requires physical hardware \xE2\x80\x94 implement for on-target build
+
+-----------------------
+5 Tests 0 Failures 5 Ignored 
+OK
+
 ------- native:hardware/test_uart_um980_smoke [PASSED] Took 0.86 seconds -------
 
 Processing host/test_ntrip_client in native environment
 --------------------------------------------------------------------------------
 Building...
+
+
 Testing...
-test/host/test_ntrip_client/test_ntrip_client.c:220: test_state_name_returns_correct_string	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:221: test_init_resets_to_idle	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:222: test_init_null_does_not_crash	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:223: test_start_transitions_to_connecting	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:224: test_start_from_non_idle_fails	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:225: test_start_null_returns_false	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:226: test_valid_transitions	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:227: test_invalid_transitions_rejected	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:228: test_transition_null_returns_false	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:229: test_same_state_transition_allowed	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:230: test_skeleton_auto_progresses_to_connected	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:231: test_skeleton_error_auto_reconnects	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:232: test_rtcm_forwarding_when_connected	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:233: test_no_rtcm_forwarding_when_not_connected	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:234: test_service_step_null_does_not_crash	[PASSED]
-test/host/test_ntrip_client/test_ntrip_client.c:235: test_service_step_not_started_does_nothing	[PASSED]
------------ native:host/test_ntrip_client [PASSED] Took 0.88 seconds -----------
+test/host/test_ntrip_client/test_ntrip_client.c:220:test_state_name_returns_correct_string:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:221:test_init_resets_to_idle:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:222:test_init_null_does_not_crash:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:223:test_start_transitions_to_connecting:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:224:test_start_from_non_idle_fails:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:225:test_start_null_returns_false:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:226:test_valid_transitions:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:227:test_invalid_transitions_rejected:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:228:test_transition_null_returns_false:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:229:test_same_state_transition_allowed:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:230:test_skeleton_auto_progresses_to_connected:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:231:test_skeleton_error_auto_reconnects:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:232:test_rtcm_forwarding_when_connected:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:233:test_no_rtcm_forwarding_when_not_connected:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:234:test_service_step_null_does_not_crash:PASS
+test/host/test_ntrip_client/test_ntrip_client.c:235:test_service_step_not_started_does_nothing:PASS
+
+-----------------------
+16 Tests 0 Failures 0 Ignored 
+OK
+
+----------- native:host/test_ntrip_client [PASSED] Took 0.90 seconds -----------
+
+Processing host/test_transport_uart in native environment
+--------------------------------------------------------------------------------
+Building...
+
+
+Testing...
+test/host/test_transport_uart/test_transport_uart.c:585:test_init_succeeds_for_console_port:PASS
+test/host/test_transport_uart/test_transport_uart.c:586:test_init_with_921600_baud:PASS
+test/host/test_transport_uart/test_transport_uart.c:587:test_init_null_params:PASS
+test/host/test_transport_uart/test_transport_uart.c:590:test_partial_write_no_data_loss:PASS
+test/host/test_transport_uart/test_transport_uart.c:591:test_partial_write_order_preserved:PASS
+test/host/test_transport_uart/test_transport_uart.c:592:test_buffer_integrity_after_partial_tx:PASS
+test/host/test_transport_uart/test_transport_uart.c:593:test_tx_backpressure_count:PASS
+test/host/test_transport_uart/test_transport_uart.c:594:test_tx_hal_failure_preserves_data:PASS
+test/host/test_transport_uart/test_transport_uart.c:597:test_rx_overflow_counter:PASS
+test/host/test_transport_uart/test_transport_uart.c:598:test_rx_highwater_tracking:PASS
+test/host/test_transport_uart/test_transport_uart.c:601:test_transport_uart_reset:PASS
+test/host/test_transport_uart/test_transport_uart.c:602:test_transport_uart_reset_null:PASS
+test/host/test_transport_uart/test_transport_uart.c:605:test_hal_uart_flush_drains_rx:PASS
+test/host/test_transport_uart/test_transport_uart.c:606:test_hal_uart_flush_not_initialized:PASS
+test/host/test_transport_uart/test_transport_uart.c:607:test_hal_uart_port_reset:PASS
+test/host/test_transport_uart/test_transport_uart.c:608:test_hal_uart_port_reset_null_config:PASS
+test/host/test_transport_uart/test_transport_uart.c:611:test_diagnostics_snapshot:PASS
+test/host/test_transport_uart/test_transport_uart.c:614:test_two_instances_independent:PASS
+
+-----------------------
+18 Tests 0 Failures 0 Ignored 
+OK
+
+---------- native:host/test_transport_uart [PASSED] Took 0.93 seconds ----------
 
 Processing host/test_byte_ring_buffer in native environment
 --------------------------------------------------------------------------------
 Building...
+
+
 Testing...
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:225: test_init_sets_capacity_and_zeros_counters	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:226: test_init_with_null_pointer_does_not_crash	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:227: test_write_single_byte	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:228: test_write_multiple_bytes	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:229: test_write_fills_to_capacity	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:230: test_write_beyond_capacity_triggers_overflow	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:231: test_write_null_buffer_returns_zero	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:232: test_write_null_data_returns_zero	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:233: test_read_single_byte	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:234: test_read_multiple_bytes_fifo_order	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:235: test_read_more_than_available	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:236: test_read_empty_buffer_returns_zero	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:237: test_read_null_buffer_returns_zero	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:238: test_wraparound_write_read_cycle	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:239: test_wraparound_full_cycle	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:240: test_available_matches_size	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:241: test_available_null_buffer_returns_zero	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:242: test_overflow_count_increments	[PASSED]
-test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:243: test_overflow_count_null_buffer_returns_zero	[PASSED]
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:225:test_init_sets_capacity_and_zeros_counters:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:226:test_init_with_null_pointer_does_not_crash:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:227:test_write_single_byte:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:228:test_write_multiple_bytes:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:229:test_write_fills_to_capacity:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:230:test_write_beyond_capacity_triggers_overflow:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:231:test_write_null_buffer_returns_zero:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:232:test_write_null_data_returns_zero:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:233:test_read_single_byte:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:234:test_read_multiple_bytes_fifo_order:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:235:test_read_more_than_available:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:236:test_read_empty_buffer_returns_zero:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:237:test_read_null_buffer_returns_zero:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:238:test_wraparound_write_read_cycle:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:239:test_wraparound_full_cycle:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:240:test_available_matches_size:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:241:test_available_null_buffer_returns_zero:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:242:test_overflow_count_increments:PASS
+test/host/test_byte_ring_buffer/test_byte_ring_buffer.c:243:test_overflow_count_null_buffer_returns_zero:PASS
+
+-----------------------
+19 Tests 0 Failures 0 Ignored 
+OK
+
 --------- native:host/test_byte_ring_buffer [PASSED] Took 0.88 seconds ---------
 
 Processing host/test_rtcm_router in native environment
 --------------------------------------------------------------------------------
 Building...
+
+
 Testing...
-test/host/test_rtcm_router/test_rtcm_router.c:215: test_init_resets_state	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:216: test_init_null_does_not_crash	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:217: test_add_output_returns_index	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:218: test_add_output_max_exceeded	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:219: test_add_output_null_returns_negative	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:220: test_set_source	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:221: test_set_source_null_does_not_crash	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:222: test_forward_to_single_output	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:223: test_forward_to_multiple_outputs	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:224: test_no_source_no_crash	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:225: test_no_outputs_data_dropped	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:226: test_output_buffer_full_drops_data	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:227: test_stats_track_correctly	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:228: test_stats_null_returns_null	[PASSED]
-test/host/test_rtcm_router/test_rtcm_router.c:229: test_service_step_null_does_not_crash	[PASSED]
+test/host/test_rtcm_router/test_rtcm_router.c:215:test_init_resets_state:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:216:test_init_null_does_not_crash:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:217:test_add_output_returns_index:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:218:test_add_output_max_exceeded:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:219:test_add_output_null_returns_negative:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:220:test_set_source:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:221:test_set_source_null_does_not_crash:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:222:test_forward_to_single_output:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:223:test_forward_to_multiple_outputs:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:224:test_no_source_no_crash:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:225:test_no_outputs_data_dropped:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:226:test_output_buffer_full_drops_data:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:227:test_stats_track_correctly:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:228:test_stats_null_returns_null:PASS
+test/host/test_rtcm_router/test_rtcm_router.c:229:test_service_step_null_does_not_crash:PASS
+
+-----------------------
+15 Tests 0 Failures 0 Ignored 
+OK
+
 ----------- native:host/test_rtcm_router [PASSED] Took 0.89 seconds -----------
 
 Processing host/test_gnss_um980 in native environment
 --------------------------------------------------------------------------------
 Building...
+
+
 Testing...
-test/host/test_gnss_um980/test_gnss_um980.c:290: test_init_sets_instance_id_and_name	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:291: test_init_sets_parser_and_snapshot	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:292: test_init_null_does_not_crash	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:295: test_feed_valid_gga_sets_gga_valid_and_updates_snapshot	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:298: test_feed_valid_rmc_sets_rmc_valid	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:301: test_feed_invalid_checksum_increments_errors	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:304: test_fragmented_input_still_parses	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:305: test_two_chunks_parse_correctly	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:308: test_two_instances_are_independent	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:311: test_service_step_reads_from_rx_source	[PASSED]
-test/host/test_gnss_um980/test_gnss_um980.c:312: test_service_step_null_does_not_crash	[PASSED]
------------- native:host/test_gnss_um980 [PASSED] Took 0.88 seconds ------------
+test/host/test_gnss_um980/test_gnss_um980.c:290:test_init_sets_instance_id_and_name:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:291:test_init_sets_parser_and_snapshot:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:292:test_init_null_does_not_crash:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:295:test_feed_valid_gga_sets_gga_valid_and_updates_snapshot:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:298:test_feed_valid_rmc_sets_rmc_valid:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:301:test_feed_invalid_checksum_increments_errors:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:304:test_fragmented_input_still_parses:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:305:test_two_chunks_parse_correctly:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:308:test_two_instances_are_independent:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:311:test_service_step_reads_from_rx_source:PASS
+test/host/test_gnss_um980/test_gnss_um980.c:312:test_service_step_null_does_not_crash:PASS
+
+-----------------------
+11 Tests 0 Failures 0 Ignored 
+OK
+
+------------ native:host/test_gnss_um980 [PASSED] Took 0.91 seconds ------------
 
 =================================== SUMMARY ===================================
-Environment    Test                        Status    Duration
--------------  --------------------------  --------  ------------
-native         sim/test_nav_chain          PASSED    00:00:00.964
-native         host/test_ntrip_client      PASSED    00:00:00.884
-native         host/test_byte_ring_buffer  PASSED    00:00:00.881
-native         host/test_rtcm_router       PASSED    00:00:00.890
-native         host/test_gnss_um980        PASSED    00:00:00.884
-============ 71 test cases: 5 skipped, 66 succeeded in 00:00:05.365 ============
-ADR Compliance Checker
-Rules: /home/z/firmware-project/tools/adr_checks/adr_rules.yaml
-Repo:  /home/z/firmware-project
-Rules loaded: 4
-
-PASS [ADR-NO-PHYSICAL-IO-IN-TASK-FAST]: task_fast / runtime_fast darf keine physische UART/UDP/TCP/SPI-I/O ausfuehren
-PASS [ADR-TRANSPORT-NO-PROTOCOL-LOGIC]: Transport-Komponenten duerfen keine AOG/NMEA/RTCM-Fachlogik enthalten
-PASS [ADR-AOG-APP-NO-PHYSICAL-UDP]: AOG-Apps duerfen nicht direkt physisch UDP senden
-PASS [ADR-GNSS-NO-DIRECT-UART]: gnss_um980 darf nicht direkt UART/HAL lesen
-
-------------------------------------------------------------
-RESULT: All rules passed
+Environment               Test                            Status    Duration
+------------------------  ------------------------------  --------  ------------
+nav_esp32_t_eth_lite      sim/test_nav_chain              SKIPPED
+nav_esp32_t_eth_lite      hardware/test_uart_um980_smoke  SKIPPED
+nav_esp32_t_eth_lite      host/test_ntrip_client          SKIPPED
+nav_esp32_t_eth_lite      host/test_transport_uart        SKIPPED
+nav_esp32_t_eth_lite      host/test_byte_ring_buffer      SKIPPED
+nav_esp32_t_eth_lite      host/test_rtcm_router           SKIPPED
+nav_esp32_t_eth_lite      host/test_gnss_um980            SKIPPED
+steer_esp32s3_t_eth_lite  sim/test_nav_chain              SKIPPED
+steer_esp32s3_t_eth_lite  hardware/test_uart_um980_smoke  SKIPPED
+steer_esp32s3_t_eth_lite  host/test_ntrip_client          SKIPPED
+steer_esp32s3_t_eth_lite  host/test_transport_uart        SKIPPED
+steer_esp32s3_t_eth_lite  host/test_byte_ring_buffer      SKIPPED
+steer_esp32s3_t_eth_lite  host/test_rtcm_router           SKIPPED
+steer_esp32s3_t_eth_lite  host/test_gnss_um980            SKIPPED
+full_test_esp32s3         sim/test_nav_chain              SKIPPED
+full_test_esp32s3         hardware/test_uart_um980_smoke  SKIPPED
+full_test_esp32s3         host/test_ntrip_client          SKIPPED
+full_test_esp32s3         host/test_transport_uart        SKIPPED
+full_test_esp32s3         host/test_byte_ring_buffer      SKIPPED
+full_test_esp32s3         host/test_rtcm_router           SKIPPED
+full_test_esp32s3         host/test_gnss_um980            SKIPPED
+native                    sim/test_nav_chain              PASSED    00:00:01.095
+native                    hardware/test_uart_um980_smoke  SKIPPED   00:00:00.861
+native                    host/test_ntrip_client          PASSED    00:00:00.895
+native                    host/test_transport_uart        PASSED    00:00:00.933
+native                    host/test_byte_ring_buffer      PASSED    00:00:00.877
+native                    host/test_rtcm_router           PASSED    00:00:00.895
+native                    host/test_gnss_um980            PASSED    00:00:00.910
+============ 89 test cases: 5 skipped, 84 succeeded in 00:00:06.466 ============

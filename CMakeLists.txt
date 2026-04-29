@@ -1,3 +1,4 @@
-cmake_minimum_required(VERSION 3.16.0)
+cmake_minimum_required(VERSION 3.16)
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(AOG_Boards_New)
+project(AOG_ESP_Multiboard)
