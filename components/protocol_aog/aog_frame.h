@@ -30,6 +30,7 @@ extern "C" {
 /* PGN numbers */
 #define AOG_PGN_POSITION_OUT    200
 #define AOG_PGN_HEADING_OUT     201
+#define AOG_PGN_214              214
 #define AOG_PGN_HELLO_RESPONSE  254
 
 /* Parser states */

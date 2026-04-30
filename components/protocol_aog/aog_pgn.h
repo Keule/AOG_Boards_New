@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <float.h>
+#include <limits.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -88,6 +90,69 @@ typedef struct {
 #define AOG_PGN_HELLO_REQUEST   253
 #endif
 
+/* ========================================================================
+ * PGN 214 - Combined GPS + Heading Output (NAV-AOG-001)
+ *
+ * Single PGN carrying position, heading, speed, and IMU data.
+ * Replaces separate PGN 200 + PGN 201 for AOG 6.x+ compatibility.
+ *
+ * Data layout (51 bytes, little-endian):
+ *   [ 0.. 7] : longitude       float64 LE
+ *   [ 8..15] : latitude        float64 LE
+ *   [16..19] : heading_dual    float32 LE  (dual-antenna heading, radians)
+ *   [20..23] : heading_true    float32 LE  (true/course heading, radians)
+ *   [24..27] : speed           float32 LE  (m/s)
+ *   [28..31] : roll            float32 LE  (radians)
+ *   [32..35] : altitude        float32 LE  (meters)
+ *   [36..37] : satellites      uint16 LE
+ *   [38]    : fix_quality     uint8
+ *   [39..40] : hdop            uint16 LE   (scale 0.01 → value = hdop * 100)
+ *   [41..42] : age             uint16 LE   (scale 0.01 → value = age_s * 100)
+ *   [43..44] : imu_heading     uint16 LE   (scale 0.1  → value = deg * 10)
+ *   [45..46] : imu_roll        int16  LE   (scale 0.1  → value = deg * 10)
+ *   [47..48] : imu_pitch       int16  LE   (raw degrees)
+ *   [49..50] : imu_yaw_rate    int16  LE   (raw deg/s)
+ * ======================================================================== */
+
+#define AOG_PGN_214              214
+#define AOG_PGN214_DATA_SIZE     51
+
+/* ---- Sentinel values for missing/invalid data ---- */
+#define AOG_PGN214_SENTINEL_DOUBLE   DBL_MAX   /* invalid lat/lon */
+#define AOG_PGN214_SENTINEL_FLOAT    FLT_MAX   /* invalid heading/speed/roll/alt */
+#define AOG_PGN214_SENTINEL_UINT16   UINT16_MAX  /* invalid uint16 fields */
+#define AOG_PGN214_SENTINEL_INT16    INT16_MAX   /* invalid int16 fields */
+#define AOG_PGN214_SENTINEL_FIX      0           /* no fix */
+
+typedef struct {
+    /* ---- Position (from GNSS primary) ---- */
+    double  longitude;        /* decimal degrees, SENTINEL_DOUBLE if invalid */
+    double  latitude;         /* decimal degrees, SENTINEL_DOUBLE if invalid */
+    float   altitude;         /* meters above geoid, SENTINEL_FLOAT if invalid */
+
+    /* ---- GNSS Heading (from dual-antenna) ---- */
+    float   heading_dual;     /* radians, SENTINEL_FLOAT if no dual heading */
+    float   heading_true;     /* radians, SENTINEL_FLOAT if no course over ground */
+
+    /* ---- Motion ---- */
+    float   speed;            /* m/s, SENTINEL_FLOAT if invalid */
+    float   roll;             /* radians, SENTINEL_FLOAT if invalid */
+
+    /* ---- Fix info ---- */
+    uint8_t fix_quality;      /* 0=none, 1=2D, 2=3D, 3=RTK fix, 4=RTK float */
+    uint16_t satellites;      /* number of satellites, SENTINEL_UINT16 if invalid */
+    uint16_t hdop_x100;       /* HDOP * 100 (scale 0.01), SENTINEL_UINT16 if invalid */
+
+    /* ---- Correction age ---- */
+    uint16_t age_x100;        /* correction age seconds * 100, SENTINEL_UINT16 if N/A */
+
+    /* ---- IMU data (from BNO085, Future Work) ---- */
+    uint16_t imu_heading_x10; /* heading degrees * 10, SENTINEL_UINT16 if no IMU */
+    int16_t  imu_roll_x10;    /* roll degrees * 10, SENTINEL_INT16 if no IMU */
+    int16_t  imu_pitch;       /* pitch degrees raw, SENTINEL_INT16 if no IMU */
+    int16_t  imu_yaw_rate;    /* yaw rate deg/s raw, SENTINEL_INT16 if no IMU */
+} aog_pgn214_t;
+
 /* ---- PGN Encode/Decode ---- */
 
 /* Encode Hello PGN into data buffer. Buffer must have AOG_HELLO_DATA_SIZE bytes.
@@ -113,6 +178,16 @@ uint8_t aog_pgn_encode_heading(uint8_t* buffer, const aog_heading_t* hdg);
 /* Decode Heading PGN from data buffer.
  * Returns true if data_length >= AOG_HEADING_DATA_SIZE. */
 bool aog_pgn_decode_heading(const uint8_t* data, uint8_t data_length, aog_heading_t* hdg);
+
+/* Encode PGN 214 into data buffer. Buffer must have AOG_PGN214_DATA_SIZE bytes.
+ * Returns AOG_PGN214_DATA_SIZE.
+ * Maps sentinel values to wire format. */
+uint8_t aog_pgn_encode_214(uint8_t* buffer, const aog_pgn214_t* data);
+
+/* Decode PGN 214 from data buffer.
+ * Returns true if data_length >= AOG_PGN214_DATA_SIZE.
+ * Restores sentinel values for invalid fields. */
+bool aog_pgn_decode_214(const uint8_t* data, uint8_t data_length, aog_pgn214_t* out);
 
 #ifdef __cplusplus
 }
