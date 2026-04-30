@@ -24,6 +24,7 @@ def _scan_components(env, proj_dir):
         "runtime_types",
         "gnss_um980",
         "gnss_snapshot",
+        "gnss_dual_heading",
         "board_profiles",
         "rtcm_router",
         "nav_rtcm_wiring",

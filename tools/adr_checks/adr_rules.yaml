@@ -66,3 +66,19 @@ rules:
       - "uart_read_bytes"
       - "hal_uart_read"
       - "transport_uart_read"
+
+  - id: ADR-HEADING-NO-UART-NO-PGN
+    description: "gnss_dual_heading darf keine UART-I/O und keine PGN-Ausgabe enthalten"
+    include:
+      - "components/gnss_dual_heading/**/*.c"
+      - "components/gnss_dual_heading/**/*.h"
+    forbidden_patterns:
+      - "uart_read_bytes"
+      - "uart_write_bytes"
+      - "hal_uart_read"
+      - "hal_uart_write"
+      - "transport_uart_read"
+      - "transport_uart_write"
+      - "PGN_"
+      - "AOG_PGN"
+      - "nmea_parser"
