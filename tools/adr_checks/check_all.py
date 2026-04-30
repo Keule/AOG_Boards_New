@@ -5,6 +5,11 @@ ADR Architecture Compliance Checker
 Scans the repository against rules defined in adr_rules.yaml.
 Reports violations with rule ID, file, line, matched pattern, and reason.
 Exits with code 0 if all rules pass, non-zero on any violation.
+
+Safety features:
+- File extension filter: only scans .c, .h, .cpp, .hpp files
+- Max files per rule: 500 (prevents runaway glob expansion)
+- Binary file detection: skips files with null bytes
 """
 
 import sys
@@ -12,6 +17,9 @@ import os
 import argparse
 import glob
 import yaml
+
+MAX_FILES_PER_RULE = 500
+ALLOWED_EXTENSIONS = {'.c', '.h', '.cpp', '.hpp', '.cc', '.cxx'}
 
 
 def load_rules(rules_path):
@@ -21,15 +29,28 @@ def load_rules(rules_path):
 
 
 def expand_globs(patterns, repo_root):
-    """Expand glob patterns to a set of absolute file paths."""
+    """Expand glob patterns to a set of absolute file paths.
+    Only includes files with allowed source extensions."""
     files = set()
     for pattern in patterns:
         full_pattern = os.path.join(repo_root, pattern)
         matched = glob.glob(full_pattern, recursive=True)
         for f in matched:
             if os.path.isfile(f):
-                files.add(f)
+                ext = os.path.splitext(f)[1].lower()
+                if ext in ALLOWED_EXTENSIONS:
+                    files.add(f)
     return files
+
+
+def is_binary(filepath):
+    """Quick check for binary files by reading first 8192 bytes."""
+    try:
+        with open(filepath, 'rb') as f:
+            chunk = f.read(8192)
+            return b'\x00' in chunk
+    except (IOError, OSError):
+        return True
 
 
 def check_rule(rule, repo_root):
@@ -45,7 +66,22 @@ def check_rule(rule, repo_root):
 
     files = expand_globs(include_patterns, repo_root)
 
+    if len(files) > MAX_FILES_PER_RULE:
+        violations.append({
+            'rule_id': rule_id,
+            'file': f'<{len(files)} files>',
+            'line': 0,
+            'pattern': '',
+            'reason': f'Too many files matched ({len(files)} > {MAX_FILES_PER_RULE}). '
+                       'Narrow your include patterns with file extensions '
+                       '(e.g. components/foo/**/*.c instead of components/foo/**).'
+        })
+        return violations
+
     for filepath in sorted(files):
+        if is_binary(filepath):
+            continue
+
         try:
             with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()

@@ -41,3 +41,28 @@ unsigned int board_profile_get_features(void)
 {
     return BOARD_FEATURE_ETHERNET | BOARD_FEATURE_UART_GNSS;
 }
+
+bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins)
+{
+    if (pins == NULL) {
+        return false;
+    }
+    switch (port) {
+    case BOARD_UART_CONSOLE:
+        pins->tx_pin = 1;
+        pins->rx_pin = 3;
+        return true;
+    case BOARD_UART_GNSS_PRIMARY:
+        pins->tx_pin = -1;
+        pins->rx_pin = 16;
+        return true;
+    case BOARD_UART_GNSS_SECONDARY:
+        pins->tx_pin = -1;
+        pins->rx_pin = 17;
+        return true;
+    default:
+        pins->tx_pin = -1;
+        pins->rx_pin = -1;
+        return false;
+    }
+}

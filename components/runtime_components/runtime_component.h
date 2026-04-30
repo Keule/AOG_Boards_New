@@ -32,6 +32,7 @@ struct runtime_component {
     runtime_component_fast_fn_t fast_process;
     runtime_component_fast_fn_t fast_output;
     runtime_component_service_fn_t service_step;
+    service_group_t service_group;    /* Core-0 service task group assignment */
 };
 
 int runtime_component_register(runtime_component_t* component);
@@ -42,6 +43,13 @@ runtime_component_t* runtime_component_get(size_t index);
  * callback if non-NULL. Subsystem-local execution — no business logic here.
  * timestamp_us: current timestamp in microseconds. */
 void runtime_service_step_all(uint64_t timestamp_us);
+
+/* Iterate over components in a specific service group and call
+ * their service_step() callback if non-NULL. */
+void runtime_service_step_group(service_group_t group, uint64_t timestamp_us);
+
+/* Get the number of components in a specific service group. */
+size_t runtime_component_count_group(service_group_t group);
 
 #ifdef __cplusplus
 }

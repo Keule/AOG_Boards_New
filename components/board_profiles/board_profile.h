@@ -55,6 +55,18 @@ bool board_profile_has_uart(board_uart_port_t port);
 bool board_profile_has_spi(board_spi_bus_t bus);
 unsigned int board_profile_get_features(void);
 
+/* ---- UART Pin Configuration ---- */
+
+typedef struct {
+    int tx_pin;
+    int rx_pin;
+} board_uart_pins_t;
+
+/* Get UART pin configuration for a specific port.
+ * Returns true if pins are available, false if port is not supported.
+ * If port is not supported, *pins is zeroed. */
+bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins);
+
 #ifdef __cplusplus
 }
 #endif

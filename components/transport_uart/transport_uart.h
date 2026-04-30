@@ -14,8 +14,9 @@ extern "C" {
 
 /* ---- Transport UART Config ---- */
 
-#define TRANSPORT_UART_RX_BUFFER_SIZE  256
-#define TRANSPORT_UART_TX_BUFFER_SIZE  256
+#define TRANSPORT_UART_RX_BUFFER_SIZE  1024
+#define TRANSPORT_UART_TX_BUFFER_SIZE  512
+#define TRANSPORT_UART_BURST_SIZE      128
 
 typedef struct {
     board_uart_port_t port;
@@ -30,8 +31,8 @@ typedef struct {
     uint32_t tx_bytes_out;       /* Total bytes written from TX buffer to HAL     */
     uint32_t tx_partial_writes;  /* Number of times HAL wrote fewer bytes than
                                     requested (backpressure event)               */
-    uint32_t tx_pushback_bytes;  /* Total bytes pushed back to TX buffer after
-                                    a partial write                               */
+    uint32_t tx_pushback_bytes;  /* DEPRECATED: no longer incremented.
+                                    Retained for backward compatibility. */
 } transport_uart_stats_t;
 
 /* ---- Transport UART Diagnostics ---- */
@@ -97,7 +98,7 @@ hal_err_t transport_uart_reset(transport_uart_t* uart);
  * Called by the runtime service loop. Non-blocking.
  *
  * TX partial write handling:
- *   1. Drain up to 64 bytes from TX ring buffer
+ *   1. Drain up to TRANSPORT_UART_BURST_SIZE bytes from TX ring buffer
  *   2. Write drained bytes to HAL UART
  *   3. If HAL wrote fewer bytes, push unwritten bytes back to ring buffer
  *   4. Increment tx_partial_writes and tx_pushback_bytes counters */

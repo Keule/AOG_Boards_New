@@ -2,6 +2,71 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Nacharbeit Review-Fixes] - Work/Config Service Profiles + runtime_set_system_mode
+
+### Changed
+- **runtime.h**: removed SKELETON marker; runtime_set_system_mode() is now productive
+- **runtime.c**: complete rewrite — uses runtime_mode for pure-logic mode switching, unified service_task_fn (no more 4 copy-paste functions), tasks read live profiles from s_profiles[] every iteration
+- **runtime_types.h**: removed SKELETON markers from system_mode_t and service_profile_t docs
+- **docs/architecture/runtime.md**: updated Modi section — productive vs TODO clearly separated, no hard MUSS claims for unimplemented features
+- **docs/adr/ADR-0002-runtime-modell.md**: added Umsetzungsstand section, changed MÜSSEN to SOLLEN for unimplemented features
+- **tools/adr_checks/adr_rules.yaml**: all include patterns now use file extension filters (*.c, *.h) instead of bare **
+- **tools/adr_checks/check_all.py**: added file extension filter, binary file detection, max-files-per-rule safety limit (500)
+
+### Added
+- **runtime_mode.h / runtime_mode.c**: host-testable pure-logic mode/profile API (no ESP-IDF dependency)
+  - runtime_mode_init() — sets mode to WORK, applies work profiles
+  - runtime_mode_set(mode) — validates mode, applies work/config profiles
+  - runtime_mode_get() — returns current mode
+  - runtime_mode_get_profile(group) — returns live profile pointer
+  - runtime_mode_work_profile(group) / runtime_mode_config_profile(group) — const profile accessors
+- **Work-mode profiles**: UART/UDP/TCP_NTRIP priority=5, period=10ms; Diagnostics priority=3, period=100ms
+- **Config-mode profiles**: UART/UDP/TCP_NTRIP priority=5, period=10ms; Diagnostics priority=6, period=50ms
+- **runtime_get_system_mode()** API to query current mode
+- **14 new host tests** in test/host/test_runtime_mode/test_runtime_mode.c
+
+### Fixed
+- **runtime_set_system_mode() was a no-op**: now fully implemented with validation, profile application, and mode storage
+- **runtime_get_service_profile() was unimplemented**: now delegates to runtime_mode_get_profile()
+- **Service tasks read cached profile copies**: tasks now read live s_profiles[] every loop iteration, so period/suspended changes take effect immediately
+- **Four identical copy-paste task functions**: replaced with single parameterized service_task_fn()
+- **ADR checker glob patterns without extensions**: now filtered to *.c/*.h only, prevents scanning build artifacts
+
+### TODO (next step, documented)
+- vTaskPrioritySet() for live priority changes without task restart (task handles need to be stored)
+- Explicit Suspend/Resume API for individual service groups
+- Feature activation per mode
+
+## [NAV-NTRIP-001 Nacharbeit] - NTRIP Client Hardening
+
+### Changed
+- **app_core API wiring**: replaced `ntrip_client_set_tcp_source()` with `ntrip_client_configure()` + `ntrip_client_set_transport()` + guarded `ntrip_client_start()`
+- **ntrip_client state machine**: new states BUILD_REQUEST, SEND_REQUEST, WAIT_RESPONSE, RETRY_WAIT replace old AUTHENTICATING/RECONNECT skeleton states
+- **transport_tcp**: added TX ring buffer with `transport_tcp_tx_write()`, `transport_tcp_tx_available()`, `transport_tcp_tx_free()`. Service step now drains TX buffer.
+- **ntrip_client CMakeLists.txt**: added `transport_tcp` dependency
+
+### Added
+- **`ntrip_client_config_t`**: host, port, mountpoint, username, password, user_agent, timeout_ms, reconnect_backoff_ms
+- **`NTRIP_CLIENT_CONFIG_DEFAULT()`** macro for safe initialization
+- **`ntrip_client_configure()`**: sets config with validation (host + mountpoint required)
+- **`ntrip_client_set_transport()`**: sets transport_tcp_t reference
+- **`ntrip_client_get_last_error()`**: returns ntrip_err_t from last failure
+- **`ntrip_client_get_http_status()`**: returns parsed HTTP status code
+- **Request partial-write safety**: `request_sent_offset` tracks progress, only transitions to WAIT_RESPONSE when fully sent
+- **Bounds-safe request builder**: `request_builder_t` with `rb_append()`/`rb_printf()` helpers, overflow → NTRIP_ERR_REQUEST_TOO_LARGE
+- **Inline base64 encoder**: for HTTP Basic Auth credentials
+- **HTTP status parsing**: detects 200 (OK), 401 (auth failed), 403 (forbidden), 404 (not found)
+- **Error path**: HTTP errors, timeout, disconnect → state ERROR → transport disconnect → RETRY_WAIT (backoff)
+- **Retry logic**: reconnect_backoff_ms timer in RETRY_WAIT state, fresh request_offset=0 on retry
+- **35 tests in test_ntrip_client**: config validation, start guards, state transitions, partial write, bounds safety, HTTP error codes, timeout, retry, reconnect counter, null safety
+
+### Fixed
+- **NTRIP starts without config**: start() now requires valid config AND transport
+- **Request data loss on partial write**: request_sent_offset ensures no bytes are skipped
+- **Request buffer overflow**: bounds-checked builder returns NTRIP_ERR_REQUEST_TOO_LARGE
+- **Error state cleanup**: ERROR state disconnects transport and clears RTCM buffer
+- **base64 buffer undersize**: cred_b64 buffer now large enough for max-length credentials
+
 ## [NAV-IO-001b] - HAL-UART Platform Split + UART Hardening
 
 ### Changed

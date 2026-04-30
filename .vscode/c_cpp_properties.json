@@ -8,7 +8,7 @@
         {
             "name": "PlatformIO",
             "includePath": [
-                "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/main",
+                "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/src",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/esp32s3/include",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/include",
                 "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/deprecated_include",
@@ -232,7 +232,7 @@
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
-                    "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/main",
+                    "C:/Users/uwe/Documents/Entwicklung/AgopenGPS/AOG_Boards_New/src",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/esp32s3/include",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/include",
                     "C:/Users/uwe/.platformio/packages/framework-espidf/components/xtensa/deprecated_include",

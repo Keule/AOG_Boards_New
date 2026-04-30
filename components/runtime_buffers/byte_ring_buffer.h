@@ -22,6 +22,15 @@ size_t byte_ring_buffer_read(byte_ring_buffer_t* buffer, uint8_t* out, size_t le
 size_t byte_ring_buffer_available(const byte_ring_buffer_t* buffer);
 uint32_t byte_ring_buffer_overflow_count(const byte_ring_buffer_t* buffer);
 
+/* Peek at data in the ring buffer without removing it.
+ * Copies min(length, available) bytes into out. Returns bytes copied. */
+size_t byte_ring_buffer_peek(const byte_ring_buffer_t* buffer, uint8_t* out, size_t length);
+
+/* Remove (consume) bytes from the head of the ring buffer without copying.
+ * Useful after peek + HAL write to discard already-written bytes.
+ * Returns bytes consumed. */
+size_t byte_ring_buffer_consume(byte_ring_buffer_t* buffer, size_t length);
+
 #ifdef __cplusplus
 }
 #endif

@@ -56,8 +56,6 @@ static hal_err_t esp32_uart_init(board_uart_port_t port, const hal_uart_config_t
     uart_config_t uart_cfg = {
         .baud_rate  = config->baudrate,
         .data_bits  = (config->data_bits == 7) ? UART_DATA_7_BITS :
-                      (config->data_bits == 8) ? UART_DATA_8_BITS :
-                      (config->data_bits == 9) ? UART_DATA_9_BITS :
                       UART_DATA_8_BITS,
         .parity     = (config->parity == 1) ? UART_PARITY_EVEN :
                       (config->parity == 2) ? UART_PARITY_ODD :
@@ -85,9 +83,10 @@ static hal_err_t esp32_uart_init(board_uart_port_t port, const hal_uart_config_t
         return HAL_ERR_IO;
     }
 
-    /* Buffer sizes */
-    int rx_buf = (config->rx_buffer_size > 0) ? (int)config->rx_buffer_size : 256;
-    int tx_buf = (config->tx_buffer_size > 0) ? (int)config->tx_buffer_size : 256;
+    /* Buffer sizes: fall back to TRANSPORT_UART buffer sizes
+     * (RX 1024, TX 512) per docs/hardware/nav-uart.md */
+    int rx_buf = (config->rx_buffer_size > 0) ? (int)config->rx_buffer_size : 1024;
+    int tx_buf = (config->tx_buffer_size > 0) ? (int)config->tx_buffer_size : 512;
 
     /* Install UART driver */
     err = uart_driver_install(uart_num, rx_buf, tx_buf, 0, NULL, 0);

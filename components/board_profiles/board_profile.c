@@ -93,3 +93,48 @@ unsigned int board_profile_get_features(void)
 
     return features;
 }
+
+bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins)
+{
+    if (pins == NULL) {
+        return false;
+    }
+
+    pins->tx_pin = -1;
+    pins->rx_pin = -1;
+
+    switch (port) {
+    case BOARD_UART_CONSOLE:
+#if defined(CONFIG_BOARD_ESP32)
+        pins->tx_pin = 1;   /* GPIO1: default TX for ESP32 */
+        pins->rx_pin = 3;   /* GPIO3: default RX for ESP32 */
+#elif defined(CONFIG_BOARD_ESP32S3)
+        pins->tx_pin = 43;  /* GPIO43: default TX for ESP32-S3 */
+        pins->rx_pin = 44;  /* GPIO44: default RX for ESP32-S3 */
+#endif
+        return true;
+
+    case BOARD_UART_GNSS_PRIMARY:
+#if defined(CONFIG_BOARD_ESP32)
+        pins->tx_pin = -1;  /* Not used for GNSS RX-only */
+        pins->rx_pin = 16;  /* GPIO16: GNSS primary RX */
+#elif defined(CONFIG_BOARD_ESP32S3)
+        pins->tx_pin = -1;
+        pins->rx_pin = 4;   /* GPIO4: GNSS primary RX on S3 */
+#endif
+        return true;
+
+    case BOARD_UART_GNSS_SECONDARY:
+#if defined(CONFIG_BOARD_ESP32)
+        pins->tx_pin = -1;
+        pins->rx_pin = 17;  /* GPIO17: GNSS secondary RX */
+#elif defined(CONFIG_BOARD_ESP32S3)
+        pins->tx_pin = -1;
+        pins->rx_pin = 5;   /* GPIO5: GNSS secondary RX on S3 */
+#endif
+        return true;
+
+    default:
+        return false;
+    }
+}

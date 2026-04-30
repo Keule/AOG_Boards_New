@@ -21,8 +21,10 @@ component_includes = [
     "components/board_profiles",
     "components/runtime_types",
     "components/runtime_components",
+    "components/runtime",
     "components/runtime_buffers",
     "components/transport_uart",
+    "components/transport_tcp",
     "components/ntrip_client",
     "components/rtcm_router",
     "components/protocol_rtcm",
@@ -52,10 +54,12 @@ lib_sources = [
     "components/runtime_components/runtime_component.c",
     "components/runtime_buffers/byte_ring_buffer.c",
     "components/transport_uart/transport_uart.c",
+    "components/transport_tcp/transport_tcp.c",
     "components/ntrip_client/ntrip_client.c",
     "components/rtcm_router/rtcm_router.c",
     "components/protocol_rtcm/rtcm_passthrough.c",
     "test/host/mocks/board_profile_mock.c",
+    "components/runtime/runtime_mode.c",
 ]
 
 abs_sources = []

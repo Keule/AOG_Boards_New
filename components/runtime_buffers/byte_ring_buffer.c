@@ -72,3 +72,32 @@ uint32_t byte_ring_buffer_overflow_count(const byte_ring_buffer_t* buffer)
 
     return buffer->overflow_count;
 }
+
+size_t byte_ring_buffer_peek(const byte_ring_buffer_t* buffer, uint8_t* out, size_t length)
+{
+    size_t copied = 0;
+    if (buffer == NULL || out == NULL || buffer->data == NULL || buffer->capacity == 0) {
+        return 0;
+    }
+    size_t idx = buffer->tail;
+    while (copied < length && copied < buffer->size) {
+        out[copied] = buffer->data[idx];
+        idx = (idx + 1) % buffer->capacity;
+        copied++;
+    }
+    return copied;
+}
+
+size_t byte_ring_buffer_consume(byte_ring_buffer_t* buffer, size_t length)
+{
+    size_t consumed = 0;
+    if (buffer == NULL || buffer->data == NULL || buffer->capacity == 0) {
+        return 0;
+    }
+    while (consumed < length && buffer->size > 0) {
+        buffer->tail = (buffer->tail + 1) % buffer->capacity;
+        buffer->size--;
+        consumed++;
+    }
+    return consumed;
+}

@@ -1,29 +1,12 @@
-# Agentensystem – AOG_ESP_Multiboard
+# AGENTS
 
-Dieses Repository verwendet drei Agententypen:
+Verbindliche Prozessdokumentation befindet sich unter:
 
-1. Planer-Agent
-2. Entwickler-Agent
-3. Reviewer- + Nacharbeitsplaner-Agent
+- `docs/process/workflow.md`
+- `docs/process/task-types.md`
+- `docs/process/definition-of-done.md`
+- `docs/process/review-rules.md`
+- `docs/process/deviations.md`
+- `docs/process/lessons-learned.md`
 
-ALLE Agenten MÜSSEN die gemeinsamen Regeln einhalten:
-
-→ agents/rules.md
-
-Zusätzlich MÜSSEN sie ihre rollenspezifischen Regeln einhalten:
-
-Planer:
-→ agents/planner.md
-
-Entwickler:
-→ agents/developer.md
-
-Reviewer:
-→ agents/reviewer.md
-
-WICHTIG:
-Agenten dürfen KEINEN Zugriff auf vorherige Chatverläufe annehmen.
-
-Alle Aufgaben müssen vollständig eigenständig verständlich sein.
-
-Der Planer-Agent ist dafür verantwortlich, dies sicherzustellen.
+Zusätzlich gelten die rollenbezogenen Regeln unter `agents/`.

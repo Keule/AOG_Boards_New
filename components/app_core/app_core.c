@@ -6,6 +6,7 @@
 #include "board_profile.h"
 #include "runtime.h"
 #include "runtime_component.h"
+#include "hal_uart.h"
 
 /* ---- Navigation subsystem includes ----
  * Only compiled in when a navigation role is active. */
@@ -101,6 +102,19 @@ void app_core_init(void)
 
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
     if (features & (FEATURE_ROLE_NAVIGATION | FEATURE_ROLE_FULL_TEST)) {
+        /* Register ESP32 HAL UART ops before first transport_uart_init() */
+        hal_uart_init(hal_uart_esp32_ops());
+    }
+#endif
+
+#if defined(DEVICE_ROLE_STEERING) || defined(DEVICE_ROLE_FULL_TEST)
+    if (features & (FEATURE_ROLE_STEERING | FEATURE_ROLE_FULL_TEST)) {
+        hal_uart_init(hal_uart_esp32_ops());
+    }
+#endif
+
+#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
+    if (features & (FEATURE_ROLE_NAVIGATION | FEATURE_ROLE_FULL_TEST)) {
         ESP_LOGI(TAG, "Initializing navigation subsystem");
 
         /* --- Transport layer --- */
@@ -143,10 +157,22 @@ void app_core_init(void)
         gnss_dual_heading_init(&s_heading);
         gnss_dual_heading_set_sources(&s_heading, &s_primary_gnss, &s_secondary_gnss);
 
-        /* --- NTRIP client --- */
+        /* --- NTRIP client ---
+         * Init, register, and configure — but do NOT start if config is invalid.
+         * Starting with empty host/mountpoint would silently fail.
+         * The client stays in IDLE until a valid config is loaded (e.g. from NVS)
+         * and ntrip_client_start() is called explicitly. */
         ntrip_client_init(&s_ntrip);
-        ntrip_client_set_tcp_source(&s_ntrip, &s_ntrip_tcp.rx_buffer);
-        ntrip_client_start(&s_ntrip);
+        ntrip_client_set_transport(&s_ntrip, &s_ntrip_tcp);
+        ntrip_client_configure(&s_ntrip, &(ntrip_client_config_t)NTRIP_CLIENT_CONFIG_DEFAULT());
+
+        if (s_ntrip.config_valid) {
+            ntrip_client_start(&s_ntrip);
+            ESP_LOGI(TAG, "NTRIP client started with valid config");
+        } else {
+            ESP_LOGW(TAG, "NTRIP client initialised but NOT started "
+                     "(empty config — host/mountpoint required)");
+        }
 
         /* --- RTCM router --- */
         rtcm_router_init(&s_rtcm_router);
@@ -161,7 +187,22 @@ void app_core_init(void)
         aog_nav_app_set_aog_rx_source(&s_nav_app, &s_aog_udp.rx_buffer);
         aog_nav_app_set_aog_tx_dest(&s_nav_app, &s_aog_udp.tx_buffer);
 
-        /* --- Register navigation components --- */
+        /* --- Assign service groups and register components ---
+         * Each component is assigned to its dedicated Core-0 service task group. */
+        s_primary_uart.component.service_group   = SERVICE_GROUP_UART;
+        s_secondary_uart.component.service_group = SERVICE_GROUP_UART;
+        s_primary_gnss.component.service_group   = SERVICE_GROUP_UART;
+        s_secondary_gnss.component.service_group = SERVICE_GROUP_UART;
+        s_heading.component.service_group        = SERVICE_GROUP_UART;
+
+        s_ntrip_tcp.component.service_group      = SERVICE_GROUP_TCP_NTRIP;
+        s_ntrip.component.service_group          = SERVICE_GROUP_TCP_NTRIP;
+
+        s_rtcm_router.component.service_group    = SERVICE_GROUP_UART;
+
+        s_aog_udp.component.service_group        = SERVICE_GROUP_UDP;
+        s_nav_app.component.service_group        = SERVICE_GROUP_DIAGNOSTICS;
+
         runtime_component_register(&s_primary_uart.component);
         runtime_component_register(&s_secondary_uart.component);
         runtime_component_register(&s_primary_gnss.component);
@@ -173,7 +214,12 @@ void app_core_init(void)
         runtime_component_register(&s_aog_udp.component);
         runtime_component_register(&s_nav_app.component);
 
-        ESP_LOGI(TAG, "Navigation components registered: 10");
+        ESP_LOGI(TAG, "Navigation components registered: 10 "
+                 "(uart=%u, udp=%u, tcp_ntrip=%u, diag=%u)",
+                 (unsigned)runtime_component_count_group(SERVICE_GROUP_UART),
+                 (unsigned)runtime_component_count_group(SERVICE_GROUP_UDP),
+                 (unsigned)runtime_component_count_group(SERVICE_GROUP_TCP_NTRIP),
+                 (unsigned)runtime_component_count_group(SERVICE_GROUP_DIAGNOSTICS));
 
         return;
     }
@@ -231,7 +277,16 @@ void app_core_init(void)
         actuator_drv8263h_set_safety_source(&s_actuator,
             safety_failsafe_get_snapshot(&s_safety));
 
-        /* --- Register steering components --- */
+        /* --- Assign service groups and register components --- */
+        s_imu.component.service_group          = SERVICE_GROUP_DIAGNOSTICS;
+        s_adc.component.service_group          = SERVICE_GROUP_DIAGNOSTICS;
+        s_was.component.service_group          = SERVICE_GROUP_DIAGNOSTICS;
+        s_steer_app.component.service_group    = SERVICE_GROUP_UDP;
+        s_steer_ctrl.component.service_group   = SERVICE_GROUP_DIAGNOSTICS;
+        s_safety.component.service_group       = SERVICE_GROUP_DIAGNOSTICS;
+        s_actuator.component.service_group     = SERVICE_GROUP_DIAGNOSTICS;
+        s_steer_udp.component.service_group    = SERVICE_GROUP_UDP;
+
         runtime_component_register(&s_imu.component);
         runtime_component_register(&s_adc.component);
         runtime_component_register(&s_was.component);
@@ -241,7 +296,12 @@ void app_core_init(void)
         runtime_component_register(&s_actuator.component);
         runtime_component_register(&s_steer_udp.component);
 
-        ESP_LOGI(TAG, "Steering components registered: 8");
+        ESP_LOGI(TAG, "Steering components registered: 8 "
+                 "(uart=%u, udp=%u, tcp_ntrip=%u, diag=%u)",
+                 (unsigned)runtime_component_count_group(SERVICE_GROUP_UART),
+                 (unsigned)runtime_component_count_group(SERVICE_GROUP_UDP),
+                 (unsigned)runtime_component_count_group(SERVICE_GROUP_TCP_NTRIP),
+                 (unsigned)runtime_component_count_group(SERVICE_GROUP_DIAGNOSTICS));
 
         return;
     }

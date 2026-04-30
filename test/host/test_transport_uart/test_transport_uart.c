@@ -262,17 +262,17 @@ void test_rx_overflow_is_tracked(void)
     transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
     transport_uart_init(&uart, &cfg);
 
-    /* Fill the 256-byte RX buffer in multiple service steps */
-    /* Each service step reads up to 64 bytes from HAL */
-    for (int step = 0; step < 4; step++) {
+    /* Fill the 1024-byte RX buffer in multiple service steps */
+    /* Each service step reads up to 128 bytes from HAL */
+    for (int step = 0; step < 8; step++) {
         transport_uart_service_step((runtime_component_t*)&uart, (uint64_t)(step + 1) * 1000);
     }
 
-    /* RX buffer should be full (256 bytes) */
-    TEST_ASSERT_EQUAL(256, transport_uart_rx_available(&uart));
+    /* RX buffer should be full (1024 bytes) */
+    TEST_ASSERT_EQUAL(1024, transport_uart_rx_available(&uart));
 
     /* One more service step — HAL provides more data but buffer is full */
-    transport_uart_service_step((runtime_component_t*)&uart, 5000);
+    transport_uart_service_step((runtime_component_t*)&uart, 9000);
 
     /* Overflow counter should have incremented */
     const transport_uart_stats_t* stats = transport_uart_get_stats(&uart);
@@ -284,15 +284,15 @@ void test_rx_overflow_visible_in_diagnostics(void)
     transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
     transport_uart_init(&uart, &cfg);
 
-    /* Fill RX buffer */
-    for (int step = 0; step < 5; step++) {
+    /* Fill RX buffer (8 steps of 128 bytes) + 1 overflow step */
+    for (int step = 0; step < 9; step++) {
         transport_uart_service_step((runtime_component_t*)&uart, (uint64_t)(step + 1) * 1000);
     }
 
     transport_uart_diagnostics_t diag;
     hal_err_t err = transport_uart_diagnostics(&uart, &diag);
     TEST_ASSERT_EQUAL(HAL_OK, err);
-    TEST_ASSERT_EQUAL(256, diag.rx_buffer_size);
+    TEST_ASSERT_EQUAL(1024, diag.rx_buffer_size);
     TEST_ASSERT_TRUE(diag.rx_overflow_total > 0);
     TEST_ASSERT_EQUAL(diag.rx_overflow_total, diag.stats.rx_overflow_count);
 }
@@ -371,8 +371,8 @@ void test_diagnostics_returns_valid_data(void)
     transport_uart_diagnostics_t diag;
     hal_err_t err = transport_uart_diagnostics(&uart, &diag);
     TEST_ASSERT_EQUAL(HAL_OK, err);
-    TEST_ASSERT_EQUAL(256, diag.rx_buffer_size);
-    TEST_ASSERT_EQUAL(256, diag.tx_buffer_size);
+    TEST_ASSERT_EQUAL(1024, diag.rx_buffer_size);
+    TEST_ASSERT_EQUAL(512, diag.tx_buffer_size);
 }
 
 void test_diagnostics_null_returns_error(void)
@@ -400,13 +400,13 @@ void test_tx_free_returns_remaining_space(void)
     transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
     transport_uart_init(&uart, &cfg);
 
-    TEST_ASSERT_EQUAL(256, transport_uart_tx_free(&uart));
+    TEST_ASSERT_EQUAL(512, transport_uart_tx_free(&uart));
 
     uint8_t data[100];
     memset(data, 0, sizeof(data));
     transport_uart_tx_write(&uart, data, 100);
 
-    TEST_ASSERT_EQUAL(156, transport_uart_tx_free(&uart));
+    TEST_ASSERT_EQUAL(412, transport_uart_tx_free(&uart));
 }
 
 void test_rx_available_null_returns_zero(void)

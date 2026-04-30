@@ -28,9 +28,15 @@ hal_err_t transport_uart_init(transport_uart_t* uart, const transport_uart_confi
     byte_ring_buffer_init(&uart->rx_buffer, uart->rx_storage, TRANSPORT_UART_RX_BUFFER_SIZE);
     byte_ring_buffer_init(&uart->tx_buffer, uart->tx_storage, TRANSPORT_UART_TX_BUFFER_SIZE);
 
-    /* Configure HAL UART */
+    /* Configure HAL UART — get pins from board profile */
     hal_uart_config_t hal_cfg = HAL_UART_CONFIG_DEFAULT();
     hal_cfg.baudrate = config->baudrate;
+
+    board_uart_pins_t uart_pins;
+    if (board_profile_get_uart_pins(config->port, &uart_pins)) {
+        hal_cfg.tx_pin = uart_pins.tx_pin;
+        hal_cfg.rx_pin = uart_pins.rx_pin;
+    }
 
     hal_err_t err = hal_uart_port_init(config->port, &hal_cfg);
     if (err != HAL_OK) {
@@ -71,7 +77,7 @@ void transport_uart_service_step(runtime_component_t* comp, uint64_t timestamp_u
     }
 
     /* ---- RX: read from HAL UART into RX buffer ---- */
-    uint8_t rx_tmp[64];
+    uint8_t rx_tmp[TRANSPORT_UART_BURST_SIZE];
     int n = hal_uart_read(uart->port, rx_tmp, sizeof(rx_tmp));
     if (n > 0) {
         size_t written = byte_ring_buffer_write(&uart->rx_buffer, rx_tmp, (size_t)n);
@@ -84,29 +90,27 @@ void transport_uart_service_step(runtime_component_t* comp, uint64_t timestamp_u
         }
     }
 
-    /* ---- TX: drain TX buffer to HAL UART (partial-write safe) ---- */
-    uint8_t tx_tmp[64];
-    size_t avail = byte_ring_buffer_available(&uart->tx_buffer);
-    if (avail > 0) {
-        /* Step 1: Drain bytes from ring buffer */
-        size_t to_drain = avail > sizeof(tx_tmp) ? sizeof(tx_tmp) : avail;
-        size_t drained = byte_ring_buffer_read(&uart->tx_buffer, tx_tmp, to_drain);
+    /* ---- TX: peek from ring buffer, write to HAL, consume written bytes ----
+     * FIFO-safe: peek reads without removing, consume only removes
+     * what HAL actually accepted.  No pushback needed. */
+    size_t tx_avail = byte_ring_buffer_available(&uart->tx_buffer);
+    if (tx_avail > 0) {
+        size_t to_peek = tx_avail > TRANSPORT_UART_BURST_SIZE ? TRANSPORT_UART_BURST_SIZE : tx_avail;
+        uint8_t tx_tmp[TRANSPORT_UART_BURST_SIZE];
+        size_t peeked = byte_ring_buffer_peek(&uart->tx_buffer, tx_tmp, to_peek);
 
-        if (drained > 0) {
-            /* Step 2: Write to HAL UART */
-            int written = hal_uart_write(uart->port, tx_tmp, drained);
+        if (peeked > 0) {
+            int written = hal_uart_write(uart->port, tx_tmp, peeked);
 
-            if (written >= 0 && (size_t)written < drained) {
-                /* Step 3: Partial write — push unwritten bytes back */
-                size_t unwritten = drained - (size_t)written;
-                byte_ring_buffer_write(&uart->tx_buffer,
-                                       tx_tmp + (size_t)written,
-                                       unwritten);
+            if (written >= 0 && (size_t)written < peeked) {
+                /* Partial write: consume only what was actually written */
                 uart->stats.tx_partial_writes++;
-                uart->stats.tx_pushback_bytes += unwritten;
             }
 
-            uart->stats.tx_bytes_out += (written > 0) ? (size_t)written : 0;
+            /* Consume all bytes that HAL accepted */
+            size_t consumed = (written > 0) ? (size_t)written : 0;
+            byte_ring_buffer_consume(&uart->tx_buffer, consumed);
+            uart->stats.tx_bytes_out += consumed;
         }
     }
 }

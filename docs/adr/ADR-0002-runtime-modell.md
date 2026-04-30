@@ -20,11 +20,44 @@
 - task_fast DARF NICHT Ethernet-SPI verwenden.
 - Core 0 MUSS Service-Tasks unter FreeRTOS ausführen.
 - Core 0 DARF KEINEN eigenen Scheduler implementieren.
+- Core 0 MUSS pro I/O-Fläche einen dedizierten Service-Task haben.
 - Das System MUSS Work und Config unterstützen.
+
+## service_profile
+
+- service_profile ist Core-0-Service-Control-State.
+- service_profile gehört NICHT zum FastCycleContext.
+- service_profile steuert Priorität, Periode und Suspend/Resume
+  der Core-0-Service-Tasks.
+- Work/Config-Moduswechsel wirken über service_profile auf die
+  Core-0-Service-Tasks, nicht auf task_fast.
+- Service-Tasks lesen Profilwerte zur Laufzeit aus zentralem Zustand
+  (s_profiles[]), sodass Moduswechsel ohne Neustart wirksam werden.
+
+## Umsetzungsstand
+
+### Produktiv
+
+- runtime_set_system_mode() wechselt zwischen Work/Config und aktualisiert
+  alle vier Service-Profile.
+- Periode aendert sich sofort beim naechsten Loop.
+- Ungueltige Modi werden abgelehnt.
+- Standardmodus ist Work.
+
+### TODO (nächster Schritt)
+
+- vTaskPrioritySet() fuer Priority-Wechsel ohne Neustart (Task-Handles
+  muessen gespeichert werden).
+- Explizites Suspend/Resume-API fuer einzelne Service-Gruppen.
+- Feature-Aktivierung je Modus.
 
 ## Konsequenzen
 
-- Moduswechsel MÜSSEN Task-Prioritäten beeinflussen.
-- Moduswechsel MÜSSEN Task-Frequenzen beeinflussen.
-- Moduswechsel MÜSSEN Suspend/Resume beeinflussen.
-- Moduswechsel MÜSSEN Feature-Aktivierung beeinflussen.
+- Moduswechsel SOLLEN Task-Prioritäten beeinflussen.
+  (TODO: vTaskPrioritySet — aktuell nur Profil-Wert, nicht FreRTOS-Prio)
+- Moduswechsel beeinflussen Task-Frequenzen (Periode, produktiv).
+- Moduswechsel SOLLEN Suspend/Resume beeinflussen.
+  (TODO: noch nicht als explizites API umgesetzt)
+- Moduswechsel SOLLEN Feature-Aktivierung beeinflussen.
+  (TODO: noch nicht implementiert)
+- task_fast/Core 1 bleibt mode-frei.

@@ -44,3 +44,26 @@ void runtime_service_step_all(uint64_t timestamp_us)
         }
     }
 }
+
+void runtime_service_step_group(service_group_t group, uint64_t timestamp_us)
+{
+    for (size_t i = 0; i < s_component_count; i++) {
+        runtime_component_t* comp = s_components[i];
+        if (comp != NULL
+            && comp->service_step != NULL
+            && comp->service_group == group) {
+            comp->service_step(comp, timestamp_us);
+        }
+    }
+}
+
+size_t runtime_component_count_group(service_group_t group)
+{
+    size_t count = 0;
+    for (size_t i = 0; i < s_component_count; i++) {
+        if (s_components[i] != NULL && s_components[i]->service_group == group) {
+            count++;
+        }
+    }
+    return count;
+}

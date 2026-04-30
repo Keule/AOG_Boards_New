@@ -3,17 +3,21 @@
 # Each rule defines:
 #   - id: Unique rule identifier
 #   - description: What the rule enforces
-#   - include: Glob patterns for files to check
+#   - include: Glob patterns for files to check (filtered by extension)
 #   - forbidden_patterns: List of patterns that must NOT appear in matching files
 #
-# The checker (check_all.py) scans all files matching the include patterns
-# and reports violations with exit code != 0.
+# IMPORTANT: include patterns MUST specify file extensions (e.g. *.c, *.h)
+# to avoid scanning build artifacts, binary files, or large directories.
+# Examples:
+#   GOOD: "components/runtime_fast/**/*.c"
+#   BAD:  "components/runtime_fast/**"
 
 rules:
   - id: ADR-NO-PHYSICAL-IO-IN-TASK-FAST
     description: "task_fast / runtime_fast darf keine physische UART/UDP/TCP/SPI-I/O ausfuehren"
     include:
-      - "components/runtime_fast/**"
+      - "components/runtime_fast/**/*.c"
+      - "components/runtime_fast/**/*.h"
     forbidden_patterns:
       - "uart_write_bytes"
       - "uart_read_bytes"
@@ -27,9 +31,12 @@ rules:
   - id: ADR-TRANSPORT-NO-PROTOCOL-LOGIC
     description: "Transport-Komponenten duerfen keine AOG/NMEA/RTCM-Fachlogik enthalten"
     include:
-      - "components/transport_uart/**"
-      - "components/transport_udp/**"
-      - "components/transport_tcp/**"
+      - "components/transport_uart/**/*.c"
+      - "components/transport_uart/**/*.h"
+      - "components/transport_udp/**/*.c"
+      - "components/transport_udp/**/*.h"
+      - "components/transport_tcp/**/*.c"
+      - "components/transport_tcp/**/*.h"
     forbidden_patterns:
       - "nmea_parser"
       - "protocol_nmea"
@@ -41,8 +48,10 @@ rules:
   - id: ADR-AOG-APP-NO-PHYSICAL-UDP
     description: "AOG-Apps duerfen nicht direkt physisch UDP senden"
     include:
-      - "components/aog_navigation_app/**"
-      - "components/aog_steering_app/**"
+      - "components/aog_navigation_app/**/*.c"
+      - "components/aog_navigation_app/**/*.h"
+      - "components/aog_steering_app/**/*.c"
+      - "components/aog_steering_app/**/*.h"
     forbidden_patterns:
       - "sendto("
       - "transport_udp_send"
@@ -51,7 +60,8 @@ rules:
   - id: ADR-GNSS-NO-DIRECT-UART
     description: "gnss_um980 darf nicht direkt UART/HAL lesen"
     include:
-      - "components/gnss_um980/**"
+      - "components/gnss_um980/**/*.c"
+      - "components/gnss_um980/**/*.h"
     forbidden_patterns:
       - "uart_read_bytes"
       - "hal_uart_read"
