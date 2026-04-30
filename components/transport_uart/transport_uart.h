@@ -33,6 +33,9 @@ typedef struct {
                                     requested (backpressure event)               */
     uint32_t tx_pushback_bytes;  /* DEPRECATED: no longer incremented.
                                     Retained for backward compatibility. */
+    uint32_t tx_errors;          /* Number of times HAL write returned negative   */
+    uint32_t tx_overflows;       /* Number of TX ring buffer overflow events
+                                    (tx_write called but buffer full)             */
 } transport_uart_stats_t;
 
 /* ---- Transport UART Diagnostics ---- */

@@ -6,6 +6,7 @@
  * This file is compiled ONLY for native tests via extra_scripts/native_test.py
  * and overrides the real board_profile.c.                            */
 
+#include <stddef.h>
 #include "board_profile.h"
 
 board_type_t board_profile_get_board(void)

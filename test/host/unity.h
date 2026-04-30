@@ -1,0 +1,121 @@
+/* Minimal Unity stub for native gcc compilation (no PlatformIO dependency) */
+#ifndef UNITY_H
+#define UNITY_H
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+
+static int s_unity_tests_run = 0;
+static int s_unity_tests_failed = 0;
+
+#define UNITY_BEGIN()        do { s_unity_tests_run = 0; s_unity_tests_failed = 0; printf("=== Unity Test Suite ===\n"); } while(0)
+#define UNITY_END()          do { printf("\n=== Results: %d run, %d failed ===\n", s_unity_tests_run, s_unity_tests_failed); return s_unity_tests_failed; } while(0)
+
+#define RUN_TEST(func)       do { \
+    setUp(); \
+    s_unity_tests_run++; \
+    printf("  TEST: %-55s ", #func); \
+    fflush(stdout); \
+    func(); \
+    tearDown(); \
+    printf("PASS\n"); \
+} while(0)
+
+#define _UNITY_FAIL_MSG(msg) do { \
+    printf("FAIL\n    %s\n", msg); \
+    s_unity_tests_failed++; \
+    return; \
+} while(0)
+
+#define _UNITY_FAIL_FMT(fmt, ...) do { \
+    printf("FAIL\n    " fmt "\n", ##__VA_ARGS__); \
+    s_unity_tests_failed++; \
+    return; \
+} while(0)
+
+#define TEST_ASSERT_EQUAL(expected, actual) do { \
+    long _e = (long)(expected), _a = (long)(actual); \
+    if (_e != _a) { \
+        printf("FAIL\n    Expected %ld but got %ld\n", _e, _a); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_ASSERT_EQUAL_PTR(expected, actual) do { \
+    const void* _e = (const void*)(expected); \
+    const void* _a = (const void*)(actual); \
+    if (_e != _a) { \
+        printf("FAIL\n    Expected ptr %p but got %p\n", _e, _a); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_ASSERT_EQUAL_MEMORY(expected, actual, len) do { \
+    const uint8_t* _e = (const uint8_t*)(expected); \
+    const uint8_t* _a = (const uint8_t*)(actual); \
+    size_t _l = (size_t)(len); \
+    if (memcmp(_e, _a, _l) != 0) { \
+        printf("FAIL\n    Memory mismatch at length %zu\n", _l); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_ASSERT_EQUAL_STRING(expected, actual) do { \
+    const char* _e = (const char*)(expected); \
+    const char* _a = (const char*)(actual); \
+    if (strcmp(_e, _a) != 0) { \
+        printf("FAIL\n    Expected \"%s\" but got \"%s\"\n", _e, _a); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_ASSERT_NOT_NULL(ptr) do { \
+    if ((ptr) == NULL) { \
+        printf("FAIL\n    Expected non-NULL\n"); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_ASSERT_NULL(ptr) do { \
+    if ((ptr) != NULL) { \
+        printf("FAIL\n    Expected NULL but got %p\n", (const void*)(ptr)); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_ASSERT_TRUE(cond) do { \
+    if (!(cond)) { \
+        printf("FAIL\n    Expected TRUE\n"); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_ASSERT_FALSE(cond) do { \
+    if ((cond)) { \
+        printf("FAIL\n    Expected FALSE\n"); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_ASSERT_GREATER_THAN(threshold, actual) do { \
+    long _t = (long)(threshold), _a = (long)(actual); \
+    if (!(_a > _t)) { \
+        printf("FAIL\n    Expected > %ld but got %ld\n", _t, _a); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_PASS() do { } while(0)
+
+#endif /* UNITY_H */

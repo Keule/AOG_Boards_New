@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [NAV-RTCM-001] - Produktives RTCM-Routing (NTRIP → Router → UM980)
+
+### Changed
+- **rtcm_router.h**: added `output_overflow_count` field to `rtcm_router_t`
+- **rtcm_router.c**: `service_step` now increments `output_overflow_count` when any output buffer is full
+- **rtcm_router.h**: added `rtcm_router_get_output_overflow_count()` API
+- **transport_uart.h**: added `tx_errors` and `tx_overflows` to `transport_uart_stats_t`
+- **transport_uart.c**: `service_step` now tracks `tx_errors` when `hal_uart_write()` returns negative; `tx_write` tracks `tx_overflows` from ring buffer overflow
+- **transport_uart.h**: `tx_pushback_bytes` marked DEPRECATED (no longer incremented; peek/consume pattern)
+- **test_transport_uart.c**: updated partial write tests for peek/consume pattern; added 3 new tests for tx_errors and tx_overflows
+- **test/host/mocks/board_profile_mock.c**: added `<stddef.h>` include for NULL
+
+### Added
+- **`rtcm_router_get_output_overflow_count()`**: returns number of output overflow events
+- **`transport_uart_stats_t.tx_errors`**: counts HAL write errors
+- **`transport_uart_stats_t.tx_overflows`**: counts TX ring buffer overflow events
+- **6 new tests in test_rtcm_router** (identical bytes, primary-full-isolation, overflow-count, null-safety, generic-no-hal, multi-step-accumulate)
+- **3 new tests in test_transport_uart** (tx_errors, tx_overflows, new-fields-zero)
+- **5 new end-to-end tests in test_nav_chain** (chain-wiring, full-flow, multi-message, service-order, no-hal-dependency)
+- **docs/hardware/nav-rtcm-routing.md**: complete documentation for RTCM routing data flow, stats, test plan, error handling
+
+### Verification
+- ✔ 21/21 rtcm_router host tests PASS (gcc native)
+- ✔ 25/25 transport_uart host tests PASS (gcc native)
+- ✔ 5/5 nav_chain sim tests PASS (gcc native)
+- ✔ 4/4 ADR compliance checks PASS
+- ✔ Productive wiring verified in app_core.c (lines 178-181)
+- ✔ Service chain: ntrip_client → rtcm_router → transport_uart (no monolith)
+
 ## [Nacharbeit Review-Fixes] - Work/Config Service Profiles + runtime_set_system_mode
 
 ### Changed

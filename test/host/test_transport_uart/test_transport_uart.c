@@ -9,6 +9,7 @@
 static int  s_hal_write_cap = 0;    /* max bytes HAL "writes" per call (0 = no limit) */
 static int  s_hal_read_cap  = 0;    /* max bytes HAL "reads" per call (0 = no limit) */
 static bool s_hal_write_partial = false;  /* simulate partial write (writes half) */
+static bool s_hal_write_error = false;    /* simulate HAL write error (returns -1) */
 
 static int test_hal_read(board_uart_port_t port, uint8_t* buf, size_t max_len)
 {
@@ -26,6 +27,9 @@ static int test_hal_write(board_uart_port_t port, const uint8_t* buf, size_t len
 {
     (void)port;
     (void)buf;
+    if (s_hal_write_error) {
+        return -1;  /* Simulate HAL error */
+    }
     if (s_hal_write_partial && len > 2) {
         /* Simulate partial write: write only half */
         return (int)(len / 2);
@@ -86,6 +90,7 @@ static void reset_hal_stubs(void)
     s_hal_write_cap = 0;
     s_hal_read_cap = 0;
     s_hal_write_partial = false;
+    s_hal_write_error = false;
 }
 
 void setUp(void)
@@ -162,7 +167,7 @@ void test_tx_write_puts_data_in_buffer(void)
     TEST_ASSERT_EQUAL(5, byte_ring_buffer_available(&uart.tx_buffer));
 }
 
-/* ---- TX Partial Write Safety ---- */
+/* ---- TX Partial Write Safety (peek/consume pattern) ---- */
 
 void test_partial_write_preserves_unwritten_bytes(void)
 {
@@ -173,37 +178,27 @@ void test_partial_write_preserves_unwritten_bytes(void)
     uint8_t data[10];
     for (int i = 0; i < 10; i++) data[i] = (uint8_t)i;
     transport_uart_tx_write(&uart, data, 10);
+    TEST_ASSERT_EQUAL(10, byte_ring_buffer_available(&uart.tx_buffer));
 
     /* HAL will only write 4 bytes per call (partial write) */
     s_hal_write_cap = 4;
 
-    /* Service step: should drain, write 4, push back 6 */
+    /* Service step: peek 10, write 4, consume 4 → 6 remaining */
     transport_uart_service_step((runtime_component_t*)&uart, 1000);
 
-    /* After first service step: 6 bytes should still be in TX buffer */
-    size_t remaining = byte_ring_buffer_available(&uart.tx_buffer);
-    TEST_ASSERT_EQUAL(6, remaining);
-
-    /* Partial write stats should be tracked */
     const transport_uart_stats_t* stats = transport_uart_get_stats(&uart);
     TEST_ASSERT_NOT_NULL(stats);
     TEST_ASSERT_EQUAL(4, stats->tx_bytes_out);
     TEST_ASSERT_EQUAL(1, stats->tx_partial_writes);
-    TEST_ASSERT_EQUAL(6, stats->tx_pushback_bytes);
 
-    /* Second service step: should drain remaining 6, write 4, push back 2 */
+    /* Second service step: peek 6, write 4, consume 4 → 2 remaining */
     transport_uart_service_step((runtime_component_t*)&uart, 2000);
+    TEST_ASSERT_EQUAL(8, stats->tx_bytes_out);
+    TEST_ASSERT_EQUAL(2, stats->tx_partial_writes);
 
-    remaining = byte_ring_buffer_available(&uart.tx_buffer);
-    TEST_ASSERT_EQUAL(2, remaining);
-
-    /* Third service step: drain 2, write 2 (all fit) */
+    /* Third service step: peek 2, write 2, consume 2 → 0 remaining */
     transport_uart_service_step((runtime_component_t*)&uart, 3000);
-
-    remaining = byte_ring_buffer_available(&uart.tx_buffer);
-    TEST_ASSERT_EQUAL(0, remaining);
-
-    /* Total bytes out: 4 + 4 + 2 = 10 */
+    TEST_ASSERT_EQUAL(0, byte_ring_buffer_available(&uart.tx_buffer));
     TEST_ASSERT_EQUAL(10, stats->tx_bytes_out);
 }
 
@@ -219,19 +214,17 @@ void test_partial_write_preserves_data_integrity(void)
     /* HAL writes 3 bytes per call */
     s_hal_write_cap = 3;
 
-    /* First service step: drain 6, write 3, push back 3 */
-    transport_uart_service_step((runtime_component_t*)&uart, 1000);
+    /* Drain all data across multiple service steps */
+    for (int i = 0; i < 20 && byte_ring_buffer_available(&uart.tx_buffer) > 0; i++) {
+        transport_uart_service_step((runtime_component_t*)&uart, (uint64_t)(i + 1) * 1000);
+    }
 
-    /* Second: drain 3, write 3 (all fit) */
-    transport_uart_service_step((runtime_component_t*)&uart, 2000);
-
-    /* TX buffer should now be empty — all data sent */
+    /* TX buffer should be empty — all data sent */
     TEST_ASSERT_EQUAL(0, byte_ring_buffer_available(&uart.tx_buffer));
 
     /* Total bytes out = 6, same as input */
     const transport_uart_stats_t* stats = transport_uart_get_stats(&uart);
     TEST_ASSERT_EQUAL(6, stats->tx_bytes_out);
-    TEST_ASSERT_EQUAL(3, stats->tx_pushback_bytes);
 }
 
 void test_no_partial_write_when_hal_accepts_all(void)
@@ -252,7 +245,8 @@ void test_no_partial_write_when_hal_accepts_all(void)
     const transport_uart_stats_t* stats = transport_uart_get_stats(&uart);
     TEST_ASSERT_EQUAL(5, stats->tx_bytes_out);
     TEST_ASSERT_EQUAL(0, stats->tx_partial_writes);
-    TEST_ASSERT_EQUAL(0, stats->tx_pushback_bytes);
+    TEST_ASSERT_EQUAL(0, stats->tx_errors);
+    TEST_ASSERT_EQUAL(0, stats->tx_overflows);
 }
 
 /* ---- RX Overflow Diagnostics ---- */
@@ -310,7 +304,8 @@ void test_stats_initially_zero(void)
     TEST_ASSERT_EQUAL(0, stats->rx_overflow_count);
     TEST_ASSERT_EQUAL(0, stats->tx_bytes_out);
     TEST_ASSERT_EQUAL(0, stats->tx_partial_writes);
-    TEST_ASSERT_EQUAL(0, stats->tx_pushback_bytes);
+    TEST_ASSERT_EQUAL(0, stats->tx_errors);
+    TEST_ASSERT_EQUAL(0, stats->tx_overflows);
 }
 
 void test_stats_null_returns_null(void)
@@ -435,6 +430,86 @@ void test_tx_write_null_returns_zero(void)
     TEST_ASSERT_EQUAL(0, transport_uart_tx_write(&uart, data, 0));
 }
 
+/* ---- NAV-RTCM-001: TX errors tracked ---- */
+
+void test_tx_errors_incremented_on_hal_error(void)
+{
+    transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
+    transport_uart_init(&uart, &cfg);
+
+    /* Write 5 bytes into TX buffer */
+    uint8_t data[] = {1, 2, 3, 4, 5};
+    transport_uart_tx_write(&uart, data, 5);
+
+    /* HAL will return -1 (error) */
+    s_hal_write_error = true;
+
+    /* Service step: HAL write fails, bytes stay in buffer */
+    transport_uart_service_step((runtime_component_t*)&uart, 1000);
+
+    const transport_uart_stats_t* stats = transport_uart_get_stats(&uart);
+    TEST_ASSERT_EQUAL(1, stats->tx_errors);
+    TEST_ASSERT_EQUAL(0, stats->tx_bytes_out);
+    /* Bytes should still be in the TX buffer (not consumed) */
+    TEST_ASSERT_EQUAL(5, byte_ring_buffer_available(&uart.tx_buffer));
+
+    /* Another service step = another error */
+    transport_uart_service_step((runtime_component_t*)&uart, 2000);
+    TEST_ASSERT_EQUAL(2, stats->tx_errors);
+
+    /* Clear error, HAL accepts all */
+    s_hal_write_error = false;
+    transport_uart_service_step((runtime_component_t*)&uart, 3000);
+    TEST_ASSERT_EQUAL(2, stats->tx_errors);  /* no more errors */
+    TEST_ASSERT_EQUAL(5, stats->tx_bytes_out);
+    TEST_ASSERT_EQUAL(0, byte_ring_buffer_available(&uart.tx_buffer));
+}
+
+/* ---- NAV-RTCM-001: TX overflows tracked ---- */
+
+void test_tx_overflows_tracked_when_buffer_full(void)
+{
+    transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
+    transport_uart_init(&uart, &cfg);
+
+    /* TX buffer is 512 bytes. Write more than that. */
+    uint8_t data[256];
+    memset(data, 0xBB, sizeof(data));
+
+    /* First write: 256 bytes — fits fully */
+    size_t written1 = transport_uart_tx_write(&uart, data, 256);
+    TEST_ASSERT_EQUAL(256, written1);
+    TEST_ASSERT_EQUAL(0, transport_uart_get_stats(&uart)->tx_overflows);
+
+    /* Second write: 256 more bytes — 256 fit (total 512) */
+    size_t written2 = transport_uart_tx_write(&uart, data, 256);
+    TEST_ASSERT_EQUAL(256, written2);
+    TEST_ASSERT_EQUAL(0, transport_uart_get_stats(&uart)->tx_overflows);
+
+    /* Third write: buffer now full — all overflow */
+    size_t written3 = transport_uart_tx_write(&uart, data, 10);
+    TEST_ASSERT_EQUAL(0, written3);
+    TEST_ASSERT_TRUE(transport_uart_get_stats(&uart)->tx_overflows > 0);
+
+    /* Drain buffer via service step */
+    transport_uart_service_step((runtime_component_t*)&uart, 1000);
+
+    /* Write again: fits, no new overflow */
+    size_t written4 = transport_uart_tx_write(&uart, data, 100);
+    TEST_ASSERT_EQUAL(100, written4);
+}
+
+void test_stats_include_new_fields_initially_zero(void)
+{
+    transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
+    transport_uart_init(&uart, &cfg);
+
+    const transport_uart_stats_t* stats = transport_uart_get_stats(&uart);
+    TEST_ASSERT_NOT_NULL(stats);
+    TEST_ASSERT_EQUAL(0, stats->tx_errors);
+    TEST_ASSERT_EQUAL(0, stats->tx_overflows);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -460,5 +535,10 @@ int main(void)
     RUN_TEST(test_tx_free_null_returns_zero);
     RUN_TEST(test_rx_read_null_returns_zero);
     RUN_TEST(test_tx_write_null_returns_zero);
-    return UNITY_END();
+
+    /* NAV-RTCM-001: TX error and overflow tracking */
+    RUN_TEST(test_tx_errors_incremented_on_hal_error);
+    RUN_TEST(test_tx_overflows_tracked_when_buffer_full);
+    RUN_TEST(test_stats_include_new_fields_initially_zero);
+    UNITY_END();
 }

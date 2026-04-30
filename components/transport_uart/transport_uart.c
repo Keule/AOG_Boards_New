@@ -102,15 +102,19 @@ void transport_uart_service_step(runtime_component_t* comp, uint64_t timestamp_u
         if (peeked > 0) {
             int written = hal_uart_write(uart->port, tx_tmp, peeked);
 
-            if (written >= 0 && (size_t)written < peeked) {
+            if (written < 0) {
+                /* HAL error: do not consume any bytes */
+                uart->stats.tx_errors++;
+            } else if ((size_t)written < peeked) {
                 /* Partial write: consume only what was actually written */
                 uart->stats.tx_partial_writes++;
+                byte_ring_buffer_consume(&uart->tx_buffer, (size_t)written);
+                uart->stats.tx_bytes_out += (size_t)written;
+            } else {
+                /* Full write: consume all peeked bytes */
+                byte_ring_buffer_consume(&uart->tx_buffer, (size_t)written);
+                uart->stats.tx_bytes_out += (size_t)written;
             }
-
-            /* Consume all bytes that HAL accepted */
-            size_t consumed = (written > 0) ? (size_t)written : 0;
-            byte_ring_buffer_consume(&uart->tx_buffer, consumed);
-            uart->stats.tx_bytes_out += consumed;
         }
     }
 }
@@ -128,7 +132,13 @@ size_t transport_uart_tx_write(transport_uart_t* uart, const uint8_t* data, size
     if (uart == NULL || data == NULL || len == 0) {
         return 0;
     }
-    return byte_ring_buffer_write(&uart->tx_buffer, data, len);
+    uint32_t overflow_before = byte_ring_buffer_overflow_count(&uart->tx_buffer);
+    size_t written = byte_ring_buffer_write(&uart->tx_buffer, data, len);
+    uint32_t overflow_after = byte_ring_buffer_overflow_count(&uart->tx_buffer);
+    if (overflow_after > overflow_before) {
+        uart->stats.tx_overflows += (overflow_after - overflow_before);
+    }
+    return written;
 }
 
 size_t transport_uart_rx_available(const transport_uart_t* uart)

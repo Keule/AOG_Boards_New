@@ -40,6 +40,7 @@ typedef struct {
     byte_ring_buffer_t* rtcm_source;  /* generic RTCM input (NOT owned) */
     rtcm_output_t      outputs[RTCM_ROUTER_MAX_OUTPUTS];
     uint8_t            output_count;
+    uint32_t           output_overflow_count;  /* number of times any output buffer was full */
 } rtcm_router_t;
 
 /* ---- API ---- */
@@ -62,8 +63,11 @@ void rtcm_router_set_source(rtcm_router_t* router, byte_ring_buffer_t* source);
  * Called by the runtime service loop. */
 void rtcm_router_service_step(runtime_component_t* comp, uint64_t timestamp_us);
 
-/* Get RTCM statistics. */
+/* Get RTCM statistics (bytes_in, bytes_out, bytes_dropped, last_activity_us). */
 const rtcm_stats_t* rtcm_router_get_stats(const rtcm_router_t* router);
+
+/* Get number of output overflow events (times any output buffer was full). */
+uint32_t rtcm_router_get_output_overflow_count(const rtcm_router_t* router);
 
 #ifdef __cplusplus
 }

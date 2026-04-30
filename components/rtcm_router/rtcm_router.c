@@ -82,6 +82,7 @@ void rtcm_router_service_step(runtime_component_t* comp, uint64_t timestamp_us)
             uint32_t dropped = (uint32_t)(pulled - written);
             out->bytes_dropped += dropped;
             rtcm_passthrough_record_dropped(&router->passthrough, dropped);
+            router->output_overflow_count++;
         }
     }
 }
@@ -92,4 +93,12 @@ const rtcm_stats_t* rtcm_router_get_stats(const rtcm_router_t* router)
         return NULL;
     }
     return rtcm_passthrough_get_stats(&router->passthrough);
+}
+
+uint32_t rtcm_router_get_output_overflow_count(const rtcm_router_t* router)
+{
+    if (router == NULL) {
+        return 0;
+    }
+    return router->output_overflow_count;
 }
