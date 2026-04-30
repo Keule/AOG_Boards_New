@@ -4,8 +4,10 @@
  * but without any ESP-IDF dependencies (no esp_log.h, no ESP_LOG macros).
  *
  * This file is compiled ONLY for native tests via extra_scripts/native_test.py
- * and overrides the real board_profile.c.                            */
-
+ * and overrides the real board_profile.c.
+ *
+ * Mock board: LilyGO T-ETH Lite ESP32 with GNSS UART TX pins assigned
+ * (matching the productive board_profile.c for NAV-RTCM-001). */
 #include <stddef.h>
 #include "board_profile.h"
 
@@ -16,7 +18,7 @@ board_type_t board_profile_get_board(void)
 
 ethernet_kind_t board_profile_get_eth(void)
 {
-    return ETH_W5500_SPI;
+    return ETH_INTERNAL_MAC_RMII;
 }
 
 bool board_profile_has_uart(board_uart_port_t port)
@@ -54,11 +56,13 @@ bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins
         pins->rx_pin = 3;
         return true;
     case BOARD_UART_GNSS_PRIMARY:
-        pins->tx_pin = -1;
+        /* Matching productive board: UART_NUM_1 TX=GPIO14, RX=GPIO16 */
+        pins->tx_pin = 14;
         pins->rx_pin = 16;
         return true;
     case BOARD_UART_GNSS_SECONDARY:
-        pins->tx_pin = -1;
+        /* Matching productive board: UART_NUM_2 TX=GPIO15, RX=GPIO17 */
+        pins->tx_pin = 15;
         pins->rx_pin = 17;
         return true;
     default:
@@ -66,4 +70,36 @@ bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins
         pins->rx_pin = -1;
         return false;
     }
+}
+
+bool board_profile_has_uart_tx(board_uart_port_t port)
+{
+    if (!board_profile_has_uart(port)) {
+        return false;
+    }
+    board_uart_pins_t pins;
+    if (!board_profile_get_uart_pins(port, &pins)) {
+        return false;
+    }
+    return pins.tx_pin != BOARD_PIN_UNASSIGNED;
+}
+
+/* ---- GNSS Port Iteration (matching productive board_profile.c) ---- */
+
+static const board_uart_port_t s_gnss_ports[] = {
+    BOARD_UART_GNSS_PRIMARY,
+    BOARD_UART_GNSS_SECONDARY,
+};
+
+int board_profile_get_gnss_port_count(void)
+{
+    return (int)(sizeof(s_gnss_ports) / sizeof(s_gnss_ports[0]));
+}
+
+board_uart_port_t board_profile_get_gnss_port(int index)
+{
+    if (index < 0 || index >= board_profile_get_gnss_port_count()) {
+        return BOARD_UART_COUNT;
+    }
+    return s_gnss_ports[index];
 }

@@ -32,7 +32,8 @@
 - Work/Config-Moduswechsel wirken über service_profile auf die
   Core-0-Service-Tasks, nicht auf task_fast.
 - Service-Tasks lesen Profilwerte zur Laufzeit aus zentralem Zustand
-  (s_profiles[]), sodass Moduswechsel ohne Neustart wirksam werden.
+  (s_profiles[]), sodass Periodenwechsel sofort wirksam werden.
+  Prioritaetswechsel erfordern noch vTaskPrioritySet() (TODO).
 
 ## Umsetzungsstand
 
@@ -54,7 +55,8 @@
 ## Konsequenzen
 
 - Moduswechsel SOLLEN Task-Prioritäten beeinflussen.
-  (TODO: vTaskPrioritySet — aktuell nur Profil-Wert, nicht FreRTOS-Prio)
+  (TODO: vTaskPrioritySet — aktuell nur Profil-Wert geschrieben,
+   nicht als FreRTOS-Prio live angewendet)
 - Moduswechsel beeinflussen Task-Frequenzen (Periode, produktiv).
 - Moduswechsel SOLLEN Suspend/Resume beeinflussen.
   (TODO: noch nicht als explizites API umgesetzt)

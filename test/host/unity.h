@@ -11,7 +11,9 @@ static int s_unity_tests_run = 0;
 static int s_unity_tests_failed = 0;
 
 #define UNITY_BEGIN()        do { s_unity_tests_run = 0; s_unity_tests_failed = 0; printf("=== Unity Test Suite ===\n"); } while(0)
-#define UNITY_END()          do { printf("\n=== Results: %d run, %d failed ===\n", s_unity_tests_run, s_unity_tests_failed); return s_unity_tests_failed; } while(0)
+/* UNITY_END() returns the failure count via GCC statement expression.
+ * This allows: return UNITY_END(); in main(). */
+#define UNITY_END()          ({ printf("\n=== Results: %d run, %d failed ===\n", s_unity_tests_run, s_unity_tests_failed); s_unity_tests_failed; })
 
 #define RUN_TEST(func)       do { \
     setUp(); \
@@ -106,6 +108,8 @@ static int s_unity_tests_failed = 0;
         return; \
     } \
 } while(0)
+
+#define TEST_ASSERT(cond) TEST_ASSERT_TRUE(cond)
 
 #define TEST_ASSERT_GREATER_THAN(threshold, actual) do { \
     long _t = (long)(threshold), _a = (long)(actual); \

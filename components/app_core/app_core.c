@@ -18,6 +18,7 @@
 #include "gnss_dual_heading.h"
 #include "ntrip_client.h"
 #include "rtcm_router.h"
+#include "nav_rtcm_wiring.h"
 #include "aog_navigation_app.h"
 #endif
 
@@ -100,18 +101,20 @@ void app_core_init(void)
 
     unsigned int features = feature_flags_get();
 
-#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
-    if (features & (FEATURE_ROLE_NAVIGATION | FEATURE_ROLE_FULL_TEST)) {
-        /* Register ESP32 HAL UART ops before first transport_uart_init() */
-        hal_uart_init(hal_uart_esp32_ops());
-    }
+    /* ---- Central ESP32 HAL UART init ----
+     * Register ESP32 ops exactly ONCE before any transport_uart_init().
+     * This covers all build profiles: NAV, STEER, and FULL_TEST.
+     * Native/host tests use hal_uart_stub_ops() or custom test ops instead.
+     * hal_uart_init() is idempotent (sets s_uart_ops pointer), but
+     * calling it once centrally avoids ambiguity and double-init confusion. */
+#if !defined(UNIT_TEST) && !defined(NATIVE_TEST)
+    hal_uart_init(hal_uart_esp32_ops());
 #endif
 
-#if defined(DEVICE_ROLE_STEERING) || defined(DEVICE_ROLE_FULL_TEST)
-    if (features & (FEATURE_ROLE_STEERING | FEATURE_ROLE_FULL_TEST)) {
-        hal_uart_init(hal_uart_esp32_ops());
-    }
-#endif
+    /* ---- Native test HAL override ----
+     * Host tests call hal_uart_init() with custom stub ops in their
+     * own setUp().  The central ESP32 init above is skipped for
+     * UNIT_TEST / NATIVE_TEST builds via the guard above. */
 
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
     if (features & (FEATURE_ROLE_NAVIGATION | FEATURE_ROLE_FULL_TEST)) {
@@ -174,11 +177,61 @@ void app_core_init(void)
                      "(empty config — host/mountpoint required)");
         }
 
-        /* --- RTCM router --- */
+        /* --- RTCM router ---
+         * Source: NTRIP client RTCM buffer.
+         * Outputs: all active GNSS receivers with valid TX pins.
+         * Uses generic nav_rtcm_wire_outputs() which iterates over
+         * the board profile GNSS port table (extensible to 3+ receivers).
+         *
+         * NAV-RTCM-001 rule: If ANY active GNSS receiver has no RTCM TX
+         * path, the system is NOT productive.  The wiring function will
+         * return productive=false with a clear error detail. */
         rtcm_router_init(&s_rtcm_router);
         rtcm_router_set_source(&s_rtcm_router, &s_ntrip.rtcm_buffer);
-        rtcm_router_add_output(&s_rtcm_router, &s_primary_uart.tx_buffer);
-        rtcm_router_add_output(&s_rtcm_router, &s_secondary_uart.tx_buffer);
+
+        /* Build target descriptor table (one entry per GNSS port candidate) */
+        nav_rtcm_target_t gnss_targets[NAV_RTCM_MAX_TARGETS];
+        int gnss_target_count = 0;
+
+        /* Map transport_uart instances to GNSS ports.
+         * s_primary_uart  corresponds to BOARD_UART_GNSS_PRIMARY
+         * s_secondary_uart corresponds to BOARD_UART_GNSS_SECONDARY
+         * Future: add s_tertiary_uart for BOARD_UART_GNSS_TERTIARY
+         *
+         * We iterate the board profile port table and resolve the
+         * matching transport_uart instance by port index. */
+        transport_uart_t* uart_by_port[BOARD_UART_COUNT] = {0};
+        uart_by_port[BOARD_UART_GNSS_PRIMARY]   = &s_primary_uart;
+        uart_by_port[BOARD_UART_GNSS_SECONDARY] = &s_secondary_uart;
+
+        for (int i = 0; i < board_profile_get_gnss_port_count() &&
+                       gnss_target_count < NAV_RTCM_MAX_TARGETS; i++) {
+            board_uart_port_t port = board_profile_get_gnss_port(i);
+            gnss_targets[gnss_target_count].port = port;
+            gnss_targets[gnss_target_count].tx_buffer =
+                (uart_by_port[port] != NULL) ? &uart_by_port[port]->tx_buffer : NULL;
+            gnss_target_count++;
+        }
+
+        /* Wire RTCM outputs generically */
+        nav_rtcm_wiring_result_t wiring =
+            nav_rtcm_wire_outputs(gnss_targets, gnss_target_count, &s_rtcm_router);
+
+        if (!wiring.productive) {
+            ESP_LOGE(TAG, "%s (active=%d, registered=%d)",
+                     wiring.error_detail ? wiring.error_detail : "unknown error",
+                     wiring.active_target_count,
+                     wiring.registered_output_count);
+            /* NAV-RTCM-001: Abort navigation init — not productive.
+             * An active GNSS receiver without RTCM output is unacceptable.
+             * The caller (runtime) should detect missing component
+             * registrations and handle accordingly. */
+            return;
+        }
+
+        ESP_LOGI(TAG, "RTCM router: %d output(s) wired for %d active GNSS receiver(s)",
+                 wiring.registered_output_count,
+                 wiring.active_target_count);
 
         /* --- AOG navigation app --- */
         aog_nav_app_init(&s_nav_app);

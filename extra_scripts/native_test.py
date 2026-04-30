@@ -30,6 +30,7 @@ component_includes = [
     "components/protocol_rtcm",
     "components/gnss_um980",
     "components/protocol_nmea",
+    "components/nav_rtcm_wiring",
 ]
 
 for d in component_includes:
@@ -58,6 +59,7 @@ lib_sources = [
     "components/ntrip_client/ntrip_client.c",
     "components/rtcm_router/rtcm_router.c",
     "components/protocol_rtcm/rtcm_passthrough.c",
+    "components/nav_rtcm_wiring/nav_rtcm_wiring.c",
     "test/host/mocks/board_profile_mock.c",
     "components/runtime/runtime_mode.c",
 ]

@@ -45,6 +45,8 @@
 - runtime_set_system_mode() ist produktiv implementiert.
 - Ungültige Modi (< 0 oder >= SYSTEM_MODE_COUNT) werden abgelehnt (return -1).
 - Der aktuelle Modus ist abrufbar via runtime_get_system_mode().
+- Profil-Periode aendert sich live (naechster Loop).  Profil-Prioritaet
+  wird in s_profiles[] geschrieben, aber FreeRTOS-Prioritaet ist TODO.
 
 ### Profil-Differenzierung
 
@@ -55,13 +57,16 @@
 ### Aktuell produktiv
 
 - Prioritäten- und Periodenwechsel via runtime_set_system_mode() schreiben
-  in den zentralen Profilzustand.  Periode aendert sich beim naechsten
-  Loop-Iteration des Service-Task sofort.
-- TODO: vTaskPrioritySet() fuer Priority-Wechsel ohne Neustart — aktuell
-  aendert sich die Task-Prioritaet erst nach einem Neustart der Tasks
-  (runtime_start()).  Der Profilwert in s_profiles[] ist korrekt, aber
-  die FreRTOS-Task-Prioritaet wird noch nicht zur Laufzeit aktualisiert.
+  in den zentralen Profilzustand (s_profiles[]).
+- **Periodenwechsel** wirkt sofort beim naechsten Loop-Iteration des
+  jeweiligen Service-Task (live, kein Neustart noetig).
+- **Prioritaetswerte** werden korrekt in s_profiles[] geschrieben, aber
+  die FreeRTOS-Task-Prioritaet wird **noch nicht live** aktualisiert.
+  Die Prioritaet aendert sich erst nach einem Neustart der Tasks
+  (runtime_start()).
+- TODO: vTaskPrioritySet() fuer Priority-Wechsel ohne Neustart —
   Task-Handles muessen dafuer gespeichert werden.
+  Bis dahin: Prioritaetswechsel erfordert runtime_start() Neustart.
 
 ### Noch nicht produktiv (TODO)
 

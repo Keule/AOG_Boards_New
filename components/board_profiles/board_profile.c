@@ -94,6 +94,30 @@ unsigned int board_profile_get_features(void)
     return features;
 }
 
+/* ---- GNSS Port Iteration (generic, extensible) ----
+ *
+ * Static table of GNSS UART port candidates for RTCM routing.
+ * To add a future TERTIARY receiver, just append one line here.
+ * All callers iterate this table generically — no hardcoded port count. */
+static const board_uart_port_t s_gnss_ports[] = {
+    BOARD_UART_GNSS_PRIMARY,
+    BOARD_UART_GNSS_SECONDARY,
+    /* Future: BOARD_UART_GNSS_TERTIARY */
+};
+
+int board_profile_get_gnss_port_count(void)
+{
+    return (int)(sizeof(s_gnss_ports) / sizeof(s_gnss_ports[0]));
+}
+
+board_uart_port_t board_profile_get_gnss_port(int index)
+{
+    if (index < 0 || index >= board_profile_get_gnss_port_count()) {
+        return BOARD_UART_COUNT;  /* invalid sentinel */
+    }
+    return s_gnss_ports[index];
+}
+
 bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins)
 {
     if (pins == NULL) {
@@ -116,25 +140,53 @@ bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins
 
     case BOARD_UART_GNSS_PRIMARY:
 #if defined(CONFIG_BOARD_ESP32)
-        pins->tx_pin = -1;  /* Not used for GNSS RX-only */
-        pins->rx_pin = 16;  /* GPIO16: GNSS primary RX */
+        /* UART_NUM_1: RX=GPIO16 (UM980 #1 NMEA TX → ESP32 RX)
+         *            TX=GPIO14 (ESP32 TX → UM980 #1 RTCM RXIN)
+         * GPIO14 is not used by RMII Ethernet on LilyGO T-ETH Lite ESP32.
+         * Wiring: ESP32 GPIO14 ↔ UM980 #1 RXIN pin. */
+        pins->tx_pin = 14;
+        pins->rx_pin = 16;
 #elif defined(CONFIG_BOARD_ESP32S3)
-        pins->tx_pin = -1;
-        pins->rx_pin = 4;   /* GPIO4: GNSS primary RX on S3 */
+        /* UART_NUM_1: RX=GPIO4 (UM980 #1 NMEA TX → ESP32-S3 RX)
+         *            TX=GPIO6 (ESP32-S3 TX → UM980 #1 RTCM RXIN)
+         * GPIO6 is not used by W5500 SPI on LilyGO T-ETH Lite ESP32-S3.
+         * Wiring: ESP32-S3 GPIO6 ↔ UM980 #1 RXIN pin. */
+        pins->tx_pin = 6;
+        pins->rx_pin = 4;
 #endif
         return true;
 
     case BOARD_UART_GNSS_SECONDARY:
 #if defined(CONFIG_BOARD_ESP32)
-        pins->tx_pin = -1;
-        pins->rx_pin = 17;  /* GPIO17: GNSS secondary RX */
+        /* UART_NUM_2: RX=GPIO17 (UM980 #2 NMEA TX → ESP32 RX)
+         *            TX=GPIO15 (ESP32 TX → UM980 #2 RTCM RXIN)
+         * GPIO15 is not used by RMII Ethernet on LilyGO T-ETH Lite ESP32.
+         * Wiring: ESP32 GPIO15 ↔ UM980 #2 RXIN pin. */
+        pins->tx_pin = 15;
+        pins->rx_pin = 17;
 #elif defined(CONFIG_BOARD_ESP32S3)
-        pins->tx_pin = -1;
-        pins->rx_pin = 5;   /* GPIO5: GNSS secondary RX on S3 */
+        /* UART_NUM_2: RX=GPIO5 (UM980 #2 NMEA TX → ESP32-S3 RX)
+         *            TX=GPIO7 (ESP32-S3 TX → UM980 #2 RTCM RXIN)
+         * GPIO7 is not used by W5500 SPI on LilyGO T-ETH Lite ESP32-S3.
+         * Wiring: ESP32-S3 GPIO7 ↔ UM980 #2 RXIN pin. */
+        pins->tx_pin = 7;
+        pins->rx_pin = 5;
 #endif
         return true;
 
     default:
         return false;
     }
+}
+
+bool board_profile_has_uart_tx(board_uart_port_t port)
+{
+    if (!board_profile_has_uart(port)) {
+        return false;
+    }
+    board_uart_pins_t pins;
+    if (!board_profile_get_uart_pins(port, &pins)) {
+        return false;
+    }
+    return pins.tx_pin != BOARD_PIN_UNASSIGNED;
 }
