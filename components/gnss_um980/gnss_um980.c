@@ -56,12 +56,9 @@ static void gnss_um980_rebuild_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
         }
 
         rx->gga_dirty = false;
-
-        /* Publish GGA to position snapshot buffer for consumers */
-        if (snap->position_valid) {
-            snapshot_buffer_set(&rx->position_snapshot, &rx->gga);
-        }
     }
+
+    /* ---- Update motion from RMC ---- */
     if (rx->rmc_dirty && rx->rmc_valid) {
         snap->speed_ms   = gnss_knots_to_ms(rx->rmc.speed_knots);
         snap->course_deg = rx->rmc.course_true;
@@ -107,6 +104,9 @@ static void gnss_um980_rebuild_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
 
     /* Fresh mark: just rebuilt, run freshness check */
     gnss_snapshot_check_freshness(snap, timestamp_ms, 0 /* use default */);
+
+    /* Publish to position snapshot buffer for downstream consumers */
+    snapshot_buffer_set(&rx->position_snapshot, snap);
 }
 
 /* ---- Public API ---- */
@@ -124,8 +124,12 @@ void gnss_um980_init(gnss_um980_t* rx, uint8_t instance_id, const char* name)
 
     nmea_parser_init(&rx->nmea_parser);
     gnss_snapshot_init(&rx->snapshot);
-    snapshot_buffer_init(&rx->position_snapshot, &rx->position_storage,
-                         sizeof(nmea_gga_t));
+
+    /* Initialize position snapshot buffer for downstream consumers */
+    gnss_snapshot_init(&rx->position_storage);
+    snapshot_buffer_init(&rx->position_snapshot,
+                        &rx->position_storage,
+                        sizeof(gnss_snapshot_t));
 
     /* Register service step callback */
     rx->component.service_step = gnss_um980_service_step;
@@ -299,6 +303,14 @@ const gnss_snapshot_t* gnss_um980_get_snapshot(const gnss_um980_t* rx)
     return &rx->snapshot;
 }
 
+const snapshot_buffer_t* gnss_um980_get_position_snapshot(const gnss_um980_t* rx)
+{
+    if (rx == NULL) {
+        return NULL;
+    }
+    return &rx->position_snapshot;
+}
+
 bool gnss_um980_has_fix(const gnss_um980_t* rx)
 {
     if (rx == NULL) {
@@ -313,12 +325,4 @@ bool gnss_um980_is_fresh(const gnss_um980_t* rx)
         return false;
     }
     return rx->snapshot.fresh;
-}
-
-const snapshot_buffer_t* gnss_um980_get_position_snapshot(const gnss_um980_t* rx)
-{
-    if (rx == NULL) {
-        return NULL;
-    }
-    return &rx->position_snapshot;
 }

@@ -17,7 +17,6 @@ def _scan_components(env, proj_dir):
 
     # Components used by native tests (pure C, no ESP-IDF deps)
     needed = [
-        "protocol_aog",
         "protocol_nmea",
         "runtime_buffers",
         "runtime_snapshot",
@@ -29,6 +28,8 @@ def _scan_components(env, proj_dir):
         "board_profiles",
         "rtcm_router",
         "nav_rtcm_wiring",
+        "protocol_aog",
+        "aog_navigation_app",
     ]
 
     for name in needed:
@@ -55,6 +56,9 @@ def _add_unity_header(env, proj_dir):
         env.Append(CPPPATH=[str(test_host)])
 
 # ---- Entry point ----
+
+from SCons.Script import Import
+Import("env")
 
 proj_dir = env.subst("$PROJECT_DIR")
 

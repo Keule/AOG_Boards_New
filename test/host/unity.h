@@ -6,6 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
+
+/* Ensure M_PI and M_PI_2 are available on strict C11 */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+#ifndef M_PI_2
+#define M_PI_2 1.57079632679489661923
+#endif
 
 static int s_unity_tests_run = 0;
 static int s_unity_tests_failed = 0;
@@ -121,5 +130,29 @@ static int s_unity_tests_failed = 0;
 } while(0)
 
 #define TEST_PASS() do { } while(0)
+
+#define TEST_FAIL_MESSAGE(msg) do { \
+    printf("FAIL\n    %s\n", (msg)); \
+    s_unity_tests_failed++; \
+    return; \
+} while(0)
+
+#define TEST_ASSERT_EQUAL_FLOAT(expected, actual) do { \
+    float _e = (float)(expected), _a = (float)(actual); \
+    if (fabsf(_e - _a) > 1e-5f) { \
+        printf("FAIL\n    Expected float %g but got %g (delta=%g)\n", _e, _a, fabsf(_e - _a)); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
+#define TEST_ASSERT_EQUAL_DOUBLE(expected, actual) do { \
+    double _e = (double)(expected), _a = (double)(actual); \
+    if (fabs(_e - _a) > 1e-9) { \
+        printf("FAIL\n    Expected double %.9g but got %.9g (delta=%.9g)\n", _e, _a, fabs(_e - _a)); \
+        s_unity_tests_failed++; \
+        return; \
+    } \
+} while(0)
 
 #endif /* UNITY_H */

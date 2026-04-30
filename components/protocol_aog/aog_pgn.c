@@ -1,7 +1,13 @@
 #include "aog_pgn.h"
+#include "aog_frame.h"
 #include <string.h>
+#include <math.h>
 
-/* ---- Helper: read/write little-endian primitives ---- */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+/* ---- Helpers: little-endian read/write ---- */
 
 static void write_double_le(uint8_t* buf, double val)
 {
@@ -40,12 +46,131 @@ static uint16_t read_uint16_le(const uint8_t* buf)
 
 static void write_int16_le(uint8_t* buf, int16_t val)
 {
-    write_uint16_le(buf, (uint16_t)val);
+    buf[0] = (uint8_t)(val & 0xFF);
+    buf[1] = (uint8_t)((val >> 8) & 0xFF);
 }
 
 static int16_t read_int16_le(const uint8_t* buf)
 {
-    return (int16_t)read_uint16_le(buf);
+    return (int16_t)((uint16_t)buf[0] | ((uint16_t)buf[1] << 8));
+}
+
+/* ---- Fix Quality Mapping ---- */
+
+uint8_t aog_fix_quality_to_aog(uint8_t gnss_fix_quality)
+{
+    switch (gnss_fix_quality) {
+    case 1:  return AOG_FIX_GPS;       /* SINGLE → GPS */
+    case 2:  return AOG_FIX_DGPS;      /* DGPS */
+    case 4:  return AOG_FIX_RTK_FIX;   /* RTK FIXED */
+    case 5:  return AOG_FIX_RTK_FLOAT; /* RTK FLOAT */
+    default: return AOG_FIX_NONE;      /* NONE / unknown */
+    }
+}
+
+/* ---- PGN 214 Sentinel Values ---- */
+
+void aog_pgn214_set_sentinels(aog_pgn214_t* data)
+{
+    if (data == NULL) return;
+    data->longitude       = AOG_SENTINEL_DOUBLE;
+    data->latitude        = AOG_SENTINEL_DOUBLE;
+    data->heading_dual    = AOG_SENTINEL_FLOAT;
+    data->heading_true    = AOG_SENTINEL_FLOAT;
+    data->speed_kmh       = AOG_SENTINEL_FLOAT;
+    data->roll            = AOG_SENTINEL_FLOAT;
+    data->altitude        = AOG_SENTINEL_FLOAT;
+    data->satellites      = AOG_SENTINEL_U16;
+    data->fix_quality     = AOG_FIX_NONE;
+    data->hdop_x100       = AOG_SENTINEL_U16;
+    data->age_x100        = AOG_SENTINEL_U16;
+    data->imu_heading_x10 = AOG_SENTINEL_U16;
+    data->imu_roll_x10    = AOG_SENTINEL_I16;
+    data->imu_pitch       = AOG_SENTINEL_I16;
+    data->imu_yaw_rate    = AOG_SENTINEL_I16;
+}
+
+/* ---- PGN 214 Encode ---- */
+
+uint8_t aog_pgn_encode_pgn214(uint8_t* buffer, const aog_pgn214_t* data)
+{
+    if (buffer == NULL || data == NULL) {
+        return 0;
+    }
+
+    /* Byte 0-7: longitude (f64 LE) */
+    write_double_le(&buffer[0], data->longitude);
+
+    /* Byte 8-15: latitude (f64 LE) */
+    write_double_le(&buffer[8], data->latitude);
+
+    /* Byte 16-19: heading_dual (f32 LE, degrees) */
+    write_float_le(&buffer[16], data->heading_dual);
+
+    /* Byte 20-23: heading_true (f32 LE, degrees) */
+    write_float_le(&buffer[20], data->heading_true);
+
+    /* Byte 24-27: speed (f32 LE, km/h) */
+    write_float_le(&buffer[24], data->speed_kmh);
+
+    /* Byte 28-31: roll (f32 LE, degrees) */
+    write_float_le(&buffer[28], data->roll);
+
+    /* Byte 32-35: altitude (f32 LE, meters) */
+    write_float_le(&buffer[32], data->altitude);
+
+    /* Byte 36-37: satellites (u16 LE) */
+    write_uint16_le(&buffer[36], data->satellites);
+
+    /* Byte 38: fix_quality (u8) */
+    buffer[38] = data->fix_quality;
+
+    /* Byte 39-40: hdop × 100 (u16 LE) */
+    write_uint16_le(&buffer[39], data->hdop_x100);
+
+    /* Byte 41-42: age × 100 (u16 LE) */
+    write_uint16_le(&buffer[41], data->age_x100);
+
+    /* Byte 43-44: imu_heading × 10 (u16 LE) */
+    write_uint16_le(&buffer[43], data->imu_heading_x10);
+
+    /* Byte 45-46: imu_roll × 10 (i16 LE) */
+    write_int16_le(&buffer[45], data->imu_roll_x10);
+
+    /* Byte 47-48: imu_pitch (i16 LE) */
+    write_int16_le(&buffer[47], data->imu_pitch);
+
+    /* Byte 49-50: imu_yaw_rate (i16 LE) */
+    write_int16_le(&buffer[49], data->imu_yaw_rate);
+
+    return AOG_PGN214_DATA_SIZE;
+}
+
+/* ---- PGN 214 Decode ---- */
+
+bool aog_pgn_decode_pgn214(const uint8_t* data, uint8_t data_length, aog_pgn214_t* out)
+{
+    if (data == NULL || out == NULL || data_length < AOG_PGN214_DATA_SIZE) {
+        return false;
+    }
+
+    out->longitude       = read_double_le(&data[0]);
+    out->latitude        = read_double_le(&data[8]);
+    out->heading_dual    = read_float_le(&data[16]);
+    out->heading_true    = read_float_le(&data[20]);
+    out->speed_kmh       = read_float_le(&data[24]);
+    out->roll            = read_float_le(&data[28]);
+    out->altitude        = read_float_le(&data[32]);
+    out->satellites      = read_uint16_le(&data[36]);
+    out->fix_quality     = data[38];
+    out->hdop_x100       = read_uint16_le(&data[39]);
+    out->age_x100        = read_uint16_le(&data[41]);
+    out->imu_heading_x10 = read_uint16_le(&data[43]);
+    out->imu_roll_x10    = read_int16_le(&data[45]);
+    out->imu_pitch       = read_int16_le(&data[47]);
+    out->imu_yaw_rate    = read_int16_le(&data[49]);
+
+    return true;
 }
 
 /* ---- PGN 254: Hello/Discovery Response ---- */
@@ -76,7 +201,31 @@ bool aog_pgn_decode_hello(const uint8_t* data, uint8_t data_length, aog_hello_t*
     return true;
 }
 
-/* ---- PGN 200: GPS Position Output ---- */
+/* ---- PGN 203: Scan Reply ---- */
+
+uint8_t aog_pgn_encode_scan_reply(uint8_t* buffer, const aog_scan_reply_t* reply)
+{
+    if (buffer == NULL || reply == NULL) {
+        return 0;
+    }
+
+    uint8_t count = reply->pgn_count;
+    if (count > AOG_SCAN_REPLY_MAX_PGNS) {
+        count = AOG_SCAN_REPLY_MAX_PGNS;
+    }
+
+    buffer[0] = reply->src;
+    buffer[1] = reply->module_type;
+    write_uint16_le(&buffer[2], (uint16_t)count);
+
+    for (uint8_t i = 0; i < count; i++) {
+        write_uint16_le(&buffer[4 + i * 2], reply->pgns[i]);
+    }
+
+    return 4 + count * 2;
+}
+
+/* ---- PGN 200: GPS Position Output (legacy) ---- */
 
 uint8_t aog_pgn_encode_position(uint8_t* buffer, const aog_position_t* pos)
 {
@@ -106,7 +255,7 @@ bool aog_pgn_decode_position(const uint8_t* data, uint8_t data_length, aog_posit
     return true;
 }
 
-/* ---- PGN 201: Heading Output ---- */
+/* ---- PGN 201: Heading Output (legacy) ---- */
 
 uint8_t aog_pgn_encode_heading(uint8_t* buffer, const aog_heading_t* hdg)
 {
@@ -128,103 +277,6 @@ bool aog_pgn_decode_heading(const uint8_t* data, uint8_t data_length, aog_headin
 
     hdg->heading = read_double_le(&data[0]);
     hdg->roll = read_double_le(&data[8]);
-
-    return true;
-}
-
-/* ========================================================================
- * PGN 214: Combined GPS + Heading Output (NAV-AOG-001)
- *
- * Wire layout (51 bytes, all little-endian):
- *   [ 0.. 7] : longitude       float64
- *   [ 8..15] : latitude        float64
- *   [16..19] : heading_dual    float32  (radians)
- *   [20..23] : heading_true    float32  (radians)
- *   [24..27] : speed           float32  (m/s)
- *   [28..31] : roll            float32  (radians)
- *   [32..35] : altitude        float32  (meters)
- *   [36..37] : satellites      uint16
- *   [38]    : fix_quality     uint8
- *   [39..40] : hdop            uint16   (×100)
- *   [41..42] : age             uint16   (×100)
- *   [43..44] : imu_heading     uint16   (×10)
- *   [45..46] : imu_roll        int16    (×10)
- *   [47..48] : imu_pitch       int16
- *   [49..50] : imu_yaw_rate    int16
- * ======================================================================== */
-
-uint8_t aog_pgn_encode_214(uint8_t* buffer, const aog_pgn214_t* data)
-{
-    if (buffer == NULL || data == NULL) {
-        return 0;
-    }
-
-    /* Position */
-    write_double_le(&buffer[0], data->longitude);
-    write_double_le(&buffer[8], data->latitude);
-
-    /* Heading */
-    write_float_le(&buffer[16], data->heading_dual);
-    write_float_le(&buffer[20], data->heading_true);
-
-    /* Motion */
-    write_float_le(&buffer[24], data->speed);
-    write_float_le(&buffer[28], data->roll);
-
-    /* Altitude */
-    write_float_le(&buffer[32], data->altitude);
-
-    /* Fix info */
-    write_uint16_le(&buffer[36], data->satellites);
-    buffer[38] = data->fix_quality;
-    write_uint16_le(&buffer[39], data->hdop_x100);
-
-    /* Correction age */
-    write_uint16_le(&buffer[41], data->age_x100);
-
-    /* IMU */
-    write_uint16_le(&buffer[43], data->imu_heading_x10);
-    write_int16_le(&buffer[45], data->imu_roll_x10);
-    write_int16_le(&buffer[47], data->imu_pitch);
-    write_int16_le(&buffer[49], data->imu_yaw_rate);
-
-    return AOG_PGN214_DATA_SIZE;
-}
-
-bool aog_pgn_decode_214(const uint8_t* data, uint8_t data_length, aog_pgn214_t* out)
-{
-    if (data == NULL || out == NULL || data_length < AOG_PGN214_DATA_SIZE) {
-        return false;
-    }
-
-    /* Position */
-    out->longitude   = read_double_le(&data[0]);
-    out->latitude    = read_double_le(&data[8]);
-
-    /* Heading */
-    out->heading_dual = read_float_le(&data[16]);
-    out->heading_true = read_float_le(&data[20]);
-
-    /* Motion */
-    out->speed = read_float_le(&data[24]);
-    out->roll  = read_float_le(&data[28]);
-
-    /* Altitude */
-    out->altitude = read_float_le(&data[32]);
-
-    /* Fix info */
-    out->satellites = read_uint16_le(&data[36]);
-    out->fix_quality = data[38];
-    out->hdop_x100  = read_uint16_le(&data[39]);
-
-    /* Correction age */
-    out->age_x100 = read_uint16_le(&data[41]);
-
-    /* IMU */
-    out->imu_heading_x10 = read_uint16_le(&data[43]);
-    out->imu_roll_x10    = read_int16_le(&data[45]);
-    out->imu_pitch       = read_int16_le(&data[47]);
-    out->imu_yaw_rate    = read_int16_le(&data[49]);
 
     return true;
 }
