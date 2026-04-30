@@ -1,90 +1,61 @@
-"""PlatformIO extra_scripts for native test environment.
-
-Compiles pure-C component sources into a static library and links
-tests against it.  No ESP-IDF source files are included.
-Mock implementations override ESP-dependent components.
-"""
+# ========================================================================
+# extra_scripts/native_test.py
+#
+# PlatformIO pre-build hook for native host tests.
+# Adds component source files and include paths to the native build,
+# since ESP-IDF's idf_component_register() is not available in native.
+#
+# Usage: Referenced via platformio.ini [env:native] extra_scripts = pre:...
+# ========================================================================
 
 import os
+from pathlib import Path
 
-Import("env")
+def _scan_components(env, proj_dir):
+    """Add component sources and include paths for native build."""
+    comp_root = Path(proj_dir) / "components"
+
+    # Components used by native tests (pure C, no ESP-IDF deps)
+    needed = [
+        "protocol_nmea",
+        "runtime_buffers",
+        "runtime_snapshot",
+        "runtime_components",
+        "runtime_types",
+        "gnss_um980",
+        "gnss_snapshot",
+        "board_profiles",
+        "rtcm_router",
+        "nav_rtcm_wiring",
+    ]
+
+    for name in needed:
+        comp_dir = comp_root / name
+        if not comp_dir.is_dir():
+            continue
+        env.Append(CPPPATH=[str(comp_dir)])
+        for src in comp_dir.glob("*.c"):
+            env.Append(CSRC_FILES=[str(src)])
+
+def _add_mocks(env, proj_dir):
+    """Add mock implementations that override real components."""
+    mocks_dir = Path(proj_dir) / "test" / "host" / "mocks"
+    if not mocks_dir.is_dir():
+        return
+    env.Append(CPPPATH=[str(mocks_dir)])
+    for src in mocks_dir.glob("*.c"):
+        env.Append(CSRC_FILES=[str(src)])
+
+def _add_unity_header(env, proj_dir):
+    """Add local unity.h from test/host."""
+    test_host = Path(proj_dir) / "test" / "host"
+    if test_host.is_dir():
+        env.Append(CPPPATH=[str(test_host)])
+
+# ---- Entry point ----
 
 proj_dir = env.subst("$PROJECT_DIR")
-build_dir = os.path.join(proj_dir, ".pio", "build", "native")
 
-# ---------------------------------------------------------------------------
-# Component include directories (headers only, no ESP-IDF transitive deps)
-# ---------------------------------------------------------------------------
-component_includes = [
-    "components/hal_backend",
-    "components/hal_uart",
-    "components/board_profiles",
-    "components/runtime_types",
-    "components/runtime_components",
-    "components/runtime",
-    "components/runtime_buffers",
-    "components/transport_uart",
-    "components/transport_tcp",
-    "components/ntrip_client",
-    "components/rtcm_router",
-    "components/protocol_rtcm",
-    "components/gnss_um980",
-    "components/protocol_nmea",
-    "components/nav_rtcm_wiring",
-]
-
-for d in component_includes:
-    path = os.path.join(proj_dir, d)
-    if os.path.isdir(path):
-        env.Append(CPPPATH=[path])
-
-# ---------------------------------------------------------------------------
-# Mock / stub include directory
-# ---------------------------------------------------------------------------
-mock_dir = os.path.join(proj_dir, "test", "host", "mocks")
-if os.path.isdir(mock_dir):
-    env.Append(CPPPATH=[mock_dir])
-
-# ---------------------------------------------------------------------------
-# Pure-C component sources + mocks — compiled into a static library
-# ---------------------------------------------------------------------------
-lib_sources = [
-    "components/hal_backend/hal_backend.c",
-    "components/hal_uart/hal_uart.c",
-    "components/hal_uart/hal_uart_stub.c",
-    "components/runtime_components/runtime_component.c",
-    "components/runtime_buffers/byte_ring_buffer.c",
-    "components/transport_uart/transport_uart.c",
-    "components/transport_tcp/transport_tcp.c",
-    "components/ntrip_client/ntrip_client.c",
-    "components/rtcm_router/rtcm_router.c",
-    "components/protocol_rtcm/rtcm_passthrough.c",
-    "components/nav_rtcm_wiring/nav_rtcm_wiring.c",
-    "test/host/mocks/board_profile_mock.c",
-    "components/runtime/runtime_mode.c",
-]
-
-abs_sources = []
-for src in lib_sources:
-    path = os.path.join(proj_dir, src)
-    if os.path.isfile(path) and path.endswith(".c"):
-        abs_sources.append(path)
-
-# Build the static library using SCons
-lib_env = env.Clone()
-
-# Ensure the library output directory exists
-os.makedirs(build_dir, exist_ok=True)
-
-lib_env.Append(CPPPATH=[os.path.join(proj_dir, d) for d in component_includes])
-if os.path.isdir(mock_dir):
-    lib_env.Append(CPPPATH=[mock_dir])
-
-lib_env.StaticLibrary(
-    target=os.path.join(build_dir, "libtestcomponents"),
-    source=abs_sources,
-)
-
-# Link all test executables against this library
-env.Append(LIBS=["testcomponents"])
-env.Append(LIBPATH=[build_dir])
+_scan_components(env, proj_dir)
+_add_mocks(env, proj_dir)
+_add_unity_header(env, proj_dir)

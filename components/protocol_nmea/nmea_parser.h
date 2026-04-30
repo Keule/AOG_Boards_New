@@ -35,12 +35,13 @@ typedef struct {
     double utc_time;            /* hhmmss.ss */
     double latitude;            /* decimal degrees (N positive) */
     double longitude;           /* decimal degrees (E positive) */
-    uint8_t fix_quality;        /* 0=invalid, 1=GPS, 2=DGPS */
+    uint8_t fix_quality;        /* 0=none, 1=GPS/3D, 2=DGPS, 4=RTK_FIX, 5=RTK_FLOAT */
     uint8_t num_sats;           /* satellites in use */
     double hdop;                /* horizontal dilution of precision */
     double altitude;            /* above geoid (meters) */
     double geoid_sep;           /* geoid separation (meters) */
     double age_diff;            /* age of differential correction (seconds) */
+    bool    age_diff_valid;     /* true if age_diff field was present and non-empty */
     uint16_t diff_station_id;   /* differential reference station ID */
 } nmea_gga_t;
 

@@ -224,7 +224,13 @@ static void nmea_parse_gga(nmea_parser_t* parser, const char* sentence)
     gga->geoid_sep = nmea_parse_double(f, flen);
 
     f = nmea_get_field(sentence, 11, &flen);
-    gga->age_diff = nmea_parse_double(f, flen);
+    if (f != NULL && flen > 0) {
+        gga->age_diff = nmea_parse_double(f, flen);
+        gga->age_diff_valid = true;
+    } else {
+        gga->age_diff = 0.0;
+        gga->age_diff_valid = false;
+    }
 
     f = nmea_get_field(sentence, 12, &flen);
     gga->diff_station_id = (uint16_t)nmea_parse_int(f, flen);
@@ -490,11 +496,14 @@ nmea_result_t nmea_parser_feed(nmea_parser_t* parser, uint8_t byte)
 
         if (received == parser->calc_checksum) {
             parser->result = NMEA_RESULT_VALID;
+            nmea_finalize_sentence(parser);
         } else {
             parser->result = NMEA_RESULT_INVALID_CHECKSUM;
+            /* CRITICAL: Do NOT parse data from invalid sentences.
+             * Clear type so downstream consumers cannot accidentally
+             * use stale data from parser->data. */
+            parser->type = NMEA_SENTENCE_NONE;
         }
-
-        nmea_finalize_sentence(parser);
         parser->state = NMEA_STATE_CR;
         return parser->result;
     }
