@@ -158,7 +158,9 @@ void app_core_init(void)
 
         /* --- Dual heading --- */
         gnss_dual_heading_init(&s_heading);
-        gnss_dual_heading_set_sources(&s_heading, &s_primary_gnss, &s_secondary_gnss);
+        gnss_dual_heading_set_sources(&s_heading,
+            gnss_um980_get_snapshot(&s_primary_gnss),
+            gnss_um980_get_snapshot(&s_secondary_gnss));
 
         /* --- NTRIP client ---
          * Init, register, and configure — but do NOT start if config is invalid.
@@ -235,8 +237,10 @@ void app_core_init(void)
 
         /* --- AOG navigation app --- */
         aog_nav_app_init(&s_nav_app);
-        aog_nav_app_set_position_source(&s_nav_app, &s_primary_gnss.position_snapshot);
-        aog_nav_app_set_heading_source(&s_nav_app, gnss_dual_heading_get_snapshot(&s_heading));
+        aog_nav_app_set_position_source(&s_nav_app,
+            gnss_um980_get_position_snapshot(&s_primary_gnss));
+        aog_nav_app_set_heading_source(&s_nav_app,
+            gnss_dual_heading_get_snapshot(&s_heading));
         aog_nav_app_set_aog_rx_source(&s_nav_app, &s_aog_udp.rx_buffer);
         aog_nav_app_set_aog_tx_dest(&s_nav_app, &s_aog_udp.tx_buffer);
 

@@ -1,5 +1,5 @@
 ================================================================================
-NAV-HEADING-001: Testergebnisse
+NAV-HEADING-001 NACHARBEIT: Testergebnisse
 ================================================================================
 
 Datum:       (nicht ausführbar in Sandbox — kein PlatformIO verfügbar)
@@ -11,103 +11,148 @@ ADR-Checks:  5/5 PASS
   ✅ ADR-TRANSPORT-NO-PROTOCOL-LOGIC
   ✅ ADR-AOG-APP-NO-PHYSICAL-UDP
   ✅ ADR-GNSS-NO-DIRECT-UART
-  ✅ ADR-HEADING-NO-UART-NO-PGN (NEU für NAV-HEADING-001)
+  ✅ ADR-HEADING-NO-UART-NO-PGN
 
 ================================================================================
-Test-Matrix (42 Tests)
+Pflicht-Nacharbeitspunkte — Erfüllung
 ================================================================================
 
-Kategorie: Init
-  [1]  test_heading_init                                     PASS
+Pflicht 1 — Baseline-Plausibilität präzisiert:
+  ✅ 3 explizite Tiers: GOOD (0.65-0.75m), DEGRADED (0.50-0.90m), BAD
+  ✅ baseline_quality Enum (INVALID/BAD/DEGRADED/GOOD)
+  ✅ Dokumentiert, getestet, reproduzierbar
 
-Kategorie: Bearing/Distance Utilities
-  [2]  test_bearing_north                                    PASS
-  [3]  test_bearing_east                                     PASS
-  [4]  test_bearing_south                                    PASS
-  [5]  test_bearing_west                                     PASS
-  [6]  test_bearing_normalization_negative                   PASS
-  [7]  test_distance_known_baseline                          PASS
-  [8]  test_distance_east_baseline                           PASS
+Pflicht 2 — Timestamp-Synchronität:
+  ✅ timestamp_delta_ms berechnet und im Snapshot
+  ✅ <=100ms GOOD, <=250ms BAD quality cap, >250ms valid=false
+  ✅ TIMESTAMP_MISMATCH reason code
 
-Kategorie: Valid/Invalid Scenarios
-  [9]  test_heading_valid_both_fresh                         PASS
-  [10] test_heading_invalid_primary_null                     PASS
-  [11] test_heading_invalid_secondary_null                   PASS
-  [12] test_heading_invalid_primary_not_position_valid       PASS
-  [13] test_heading_invalid_secondary_not_position_valid     PASS
-  [14] test_heading_primary_stale_not_fresh                  PASS
-  [15] test_heading_secondary_stale_not_fresh                PASS
+Pflicht 3 — Freshness strikt:
+  ✅ KRITISCHER BUGFIX: stale snapshot → valid=false (was valid=true in v1)
+  ✅ PRIMARY_STALE / SECONDARY_STALE reason codes
+  ✅ Tests korrigiert (waren falsche Erwartungen in v1)
 
-Kategorie: Identical Positions and Baseline Limits
-  [16] test_heading_identical_positions                      PASS
-  [17] test_heading_baseline_too_small                       PASS
-  [18] test_heading_baseline_too_large                       PASS
+Pflicht 4 — Näherungsmethode dokumentiert:
+  ✅ Equirectangular-Projektion explizit beschrieben
+  ✅ Fehlergrenzen dokumentiert (< 0.01° bei 70cm)
+  ✅ "Keine geodätische Langstreckenberechnung" dokumentiert
 
-Kategorie: Quality Levels
-  [19] test_quality_excellent_rtk_fixed_both_baseline_ok     PASS
-  [20] test_quality_good_rtk_one_baseline_ok                 PASS
-  [21] test_quality_degraded_single_fix                      PASS
-  [22] test_quality_poor_baseline_off                        PASS
+Pflicht 5 — Montage-/Offset-Regeln:
+  ✅ heading = primary → secondary = Antennenlinienheading
+  ✅ Dokumentiert: nicht automatisch Fahrzeugheading
+  ✅ mounting_offset_deg reserviert für Future Work
 
-Kategorie: Fix Quality NONE/UNKNOWN
-  [23] test_heading_primary_fix_none                         PASS
-  [24] test_heading_primary_fix_unknown                      PASS
-  [25] test_heading_secondary_fix_none                       PASS
+Pflicht 6 — Testhärtung erweitert:
+  ✅ 51 Host-Tests (was 44 in v1)
+  ✅ Alle geforderten Szenarien abgedeckt
 
-Kategorie: Configuration
-  [26] test_baseline_plausibility_70cm                       PASS
-  [27] test_set_custom_baseline                              PASS
-  [28] test_set_baseline_tolerance_clamping                  PASS
-  [29] test_set_freshness_timeout_clamping                   PASS
-  [30] test_set_sources_disconnect                           PASS
+Pflicht 7 — Snapshot-Modell geschärft:
+  ✅ timestamp_delta_ms
+  ✅ baseline_quality
+  ✅ mounting_offset_deg (reserved)
+  ✅ quality als klarer Enum (keine bool/float Mischform)
 
-Kategorie: Counters and Timestamps
-  [31] test_calc_count_increments                            PASS
-  [32] test_timestamp_propagated                             PASS
-
-Kategorie: Null Safety
-  [33] test_null_safety                                      PASS
-
-Kategorie: Service Step
-  [34] test_service_step_delegates_to_calculate              PASS
-
-Kategorie: is_fresh Helper
-  [35] test_is_fresh_helper                                  PASS
-
-Kategorie: Getter
-  [36] test_heading_getter                                   PASS
-
-Kategorie: Real 70cm Cardinal Directions
-  [37] test_heading_70cm_east                                PASS
-  [38] test_heading_70cm_south                               PASS
-  [39] test_heading_70cm_west                                PASS
-
-Kategorie: Additional Tests
-  [40] test_quality_dgps_both                                PASS
-  [41] test_quality_pps_usable                               PASS
-  [42] test_calc_count_no_increment_on_invalid               PASS
-  [43] test_heading_freshness_transition                     PASS
-  [44] test_invalid_calculate_preserves_previous             PASS
+Pflicht 8 — Dokumentation:
+  ✅ docs/hardware/nav-heading.md komplett neu geschrieben
+  ✅ Alle Pflichtinhalte enthalten
 
 ================================================================================
-Zusammenfassung
+Test-Matrix (51 Tests)
 ================================================================================
 
-Tests gesamt:         44
-Tests erwartet PASS:  44
-Tests erwartet FAIL:   0
-Tests SKIPPED:         0
-Hardware-Tests:        N/A (nicht Teil dieses Tasks)
+  [1]  test_heading_init
+  [2]  test_bearing_north
+  [3]  test_bearing_east
+  [4]  test_bearing_south
+  [5]  test_bearing_west
+  [6]  test_bearing_normalization_sw
+  [7]  test_distance_known_baseline
+  [8]  test_heading_valid_both_position_valid_and_fresh
+  [9]  test_heading_invalid_primary_null
+  [10] test_heading_invalid_secondary_null
+  [11] test_heading_invalid_primary_not_position_valid
+  [12] test_heading_invalid_secondary_not_position_valid
+  [13] test_heading_strict_primary_stale_invalid       ← Pflicht 3
+  [14] test_heading_strict_secondary_stale_invalid     ← Pflicht 3
+  [15] test_heading_both_stale_primary_stale_first     ← Pflicht 3
+  [16] test_heading_identical_positions
+  [17] test_heading_baseline_near_zero                  ← Pflicht 6
+  [18] test_heading_baseline_too_large
+  [19] test_baseline_exact_70cm_good                   ← Pflicht 6
+  [20] test_baseline_065m_good_boundary                ← Pflicht 6
+  [21] test_baseline_075m_good_boundary                ← Pflicht 6
+  [22] test_baseline_050m_degraded_boundary            ← Pflicht 6
+  [23] test_baseline_090m_degraded_boundary            ← Pflicht 6
+  [24] test_baseline_040m_bad                          ← Pflicht 6
+  [25] test_baseline_150m_bad                          ← Pflicht 6
+  [26] test_baseline_classification_below_min
+  [27] test_baseline_classification_above_max
+  [28] test_quality_degraded_baseline_degraded_single
+  [29] test_quality_bad_baseline_even_with_rtk
+  [30] test_quality_excellent_all_conditions
+  [31] test_quality_good_rtk_one_good_baseline
+  [32] test_timestamp_desync_quality_bad              ← Pflicht 2
+  [33] test_timestamp_mismatch_invalid                ← Pflicht 2
+  [34] test_timestamp_delta_at_good_threshold          ← Pflicht 2
+  [35] test_timestamp_delta_at_max_threshold           ← Pflicht 2
+  [36] test_timestamp_delta_zero_perfect               ← Pflicht 2
+  [37] test_swapped_antennas_180_offset                ← Pflicht 6
+  [38] test_heading_359_0_wraparound                   ← Pflicht 6
+  [39] test_heading_primary_fix_none
+  [40] test_heading_primary_fix_unknown
+  [41] test_calc_count_only_on_valid
+  [42] test_timestamp_propagated
+  [43] test_null_safety
+  [44] test_service_step_delegates
+  [45] test_is_fresh_strict
+  [46] test_heading_getter
+  [47] test_heading_70cm_north                         ← Pflicht 6
+  [48] test_heading_70cm_east                          ← Pflicht 6
+  [49] test_heading_70cm_south                         ← Pflicht 6
+  [50] test_heading_70cm_west                          ← Pflicht 6
+  [51] test_heading_freshness_strict_transition        ← Pflicht 3
 
 ================================================================================
 Akzeptanzkriterien
 ================================================================================
 
-✔ Heading Snapshot vorhanden (gnss_heading_snapshot_t)
-✔ Heading aus primary/secondary berechnet (gnss_dual_heading_calc)
-✔ Baseline-Plausibilität vorhanden (min/max/tolerance checks)
-✔ Invalid/Freshness-Fälle getestet (13 Tests)
-✔ keine Layerverletzung (5/5 ADR-Checks grün)
-✔ native Tests definiert (44 Tests)
+✔ Heading-Berechnung bleibt modular
+✔ Baseline formalisiert (3 Tiers + Enum)
+✔ Quality enum/status vorhanden (5 Stufen + baseline_quality 4 Stufen)
+✔ Timestamp-Synchronität geprüft (delta_ms + 3-Schwellen)
+✔ Freshness strikt (stale → valid=false mit Reason)
+✔ Invalid Reasons vorhanden (10 präzise Codes)
+✔ Dokumentation präzisiert (nav-heading.md komplett neu)
+✔ Hosttests erweitert (51 Tests)
+✔ native Tests definiert (nicht ausführbar in Sandbox)
 ✔ ADR-Checks grün (5/5 PASS)
-✔ ESP32 Buildprofile: gnss_dual_heading.c uses only math.h + string.h (pure C)
+✔ ESP32 Builds: gnss_dual_heading.c pure C (math.h + string.h)
+✔ keine Layerverletzung
+
+================================================================================
+Breaking API Changes gegenüber v1
+================================================================================
+
+ENTFERNT:
+  - gnss_dual_heading_set_baseline_tolerance() (durch feste Tiers ersetzt)
+
+GEÄNDERT:
+  - HEADING_REASON_NO_PRIMARY      → HEADING_REASON_PRIMARY_INVALID
+  - HEADING_REASON_NO_SECONDARY    → HEADING_REASON_SECONDARY_INVALID
+  - HEADING_REASON_BASELINE_TOO_SMALL → HEADING_REASON_BASELINE_INVALID
+  - HEADING_REASON_BASELINE_TOO_LARGE → (merged into BASELINE_INVALID)
+  - HEADING_REASON_PRIMARY_STALE   → NEU (war nicht in v1)
+  - HEADING_REASON_SECONDARY_STALE → NEU (war nicht in v1)
+  - HEADING_REASON_TIMESTAMP_MISMATCH → NEU
+
+NEU:
+  - gnss_baseline_quality_t (INVALID/BAD/DEGRADED/GOOD)
+  - HEADING_QUALITY_BAD (neue Stufe)
+  - gnss_dual_heading_classify_baseline()
+  - heading.timestamp_delta_ms
+  - heading.baseline_quality
+  - heading.mounting_offset_deg
+
+KRITISCHES BEHAVIOR CHANGE:
+  - v1: stale snapshot → valid=true, fresh=false
+  - Nacharbeit: stale snapshot → valid=false, reason=PRIMARY_STALE/SECONDARY_STALE

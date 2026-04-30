@@ -33,6 +33,7 @@
 #include "nmea_parser.h"
 #include "gnss_snapshot.h"
 #include "byte_ring_buffer.h"
+#include "snapshot_buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -63,6 +64,10 @@ typedef struct {
 
     /* ---- Unified GNSS snapshot (merged from GGA+RMC+GST) ---- */
     gnss_snapshot_t snapshot;
+
+    /* ---- Position snapshot buffer (for consumers via snapshot_buffer API) ---- */
+    snapshot_buffer_t  position_snapshot;
+    nmea_gga_t         position_storage;
 
     /* ---- Freshness configuration ---- */
     uint32_t freshness_timeout_ms;
@@ -140,6 +145,10 @@ bool gnss_um980_has_fix(const gnss_um980_t* rx);
 
 /* Check if snapshot is fresh (within timeout). */
 bool gnss_um980_is_fresh(const gnss_um980_t* rx);
+
+/* Get pointer to position snapshot buffer (for AOG nav app consumers).
+ * Returns NULL if rx is NULL. */
+const snapshot_buffer_t* gnss_um980_get_position_snapshot(const gnss_um980_t* rx);
 
 #ifdef __cplusplus
 }

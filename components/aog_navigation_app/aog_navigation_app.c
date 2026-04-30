@@ -1,5 +1,10 @@
 #include "aog_navigation_app.h"
 #include <string.h>
+#include <math.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 /* ---- Constants ---- */
 
@@ -136,10 +141,11 @@ void aog_nav_app_service_step(runtime_component_t* comp, uint64_t timestamp_us)
 
         /* Heading output (PGN 201) — read from heading snapshot */
         if (app->heading_source != NULL && snapshot_buffer_is_valid(app->heading_source)) {
-            gnss_dual_heading_t hdg;
+            gnss_heading_snapshot_t hdg;
             if (snapshot_buffer_get(app->heading_source, &hdg)) {
                 if (hdg.valid) {
-                    app->aog_heading.heading = hdg.heading_rad;
+                    /* heading_deg → radians for AOG PGN 201 */
+                    app->aog_heading.heading = hdg.heading_deg * M_PI / 180.0;
                     app->aog_heading.roll = 0.0;
                     app->heading_valid = true;
 
