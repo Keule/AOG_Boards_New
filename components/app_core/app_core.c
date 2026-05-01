@@ -502,6 +502,10 @@ void app_core_start(void)
 /* ========================================================================
  * app_core_nav_diag_step — Pure diagnostic step (Pflicht 1+2+3)
  *
+ * Guard: Only compiled when a navigation role is active, because it
+ * depends on nav_diagnostics types (nav_health_collector_t, etc.).
+ * For STEER-only builds this function does not exist.
+ *
  * Platform-independent, testable, no ESP-IDF dependencies.
  * Performs three steps:
  *   1. nav_health_collector_set_eth_link()   — update ETH state
@@ -525,6 +529,7 @@ void app_core_start(void)
  *   eth_link_up: Current Ethernet link state (set by caller — no HAL dep)
  *
  * Returns: true if recovery actions are recommended. */
+#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
 bool app_core_nav_diag_step(void* collector,
                              void* snapshot,
                              void* recovery,
@@ -551,3 +556,4 @@ bool app_core_nav_diag_step(void* collector,
 
     return nav_recovery_needs_action(recov);
 }
+#endif /* DEVICE_ROLE_NAVIGATION || DEVICE_ROLE_FULL_TEST */

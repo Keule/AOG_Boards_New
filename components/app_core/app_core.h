@@ -14,6 +14,9 @@ void app_core_start(void);
 
 /* ---- NAV-DIAG: Pure diagnostic step function ----
  *
+ * Guard: Only available when a navigation role is active.
+ * For STEER-only builds this function is not declared.
+ *
  * Platform-independent, testable, no ESP-IDF dependencies.
  * Performs: eth_link update → health collect → recovery evaluate.
  * Does NOT log — caller can check the snapshot and recovery status.
@@ -32,11 +35,13 @@ void app_core_start(void);
  *   - O(1) execution time
  *
  * Returns: true if recovery actions are recommended. */
+#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
 bool app_core_nav_diag_step(void* collector,
                              void* snapshot,
                              void* recovery,
                              uint64_t now_ms,
                              bool eth_link_up);
+#endif
 
 #ifdef __cplusplus
 }
