@@ -133,6 +133,10 @@ void gnss_um980_init(gnss_um980_t* rx, uint8_t instance_id, const char* name)
 
     /* Register service step callback */
     rx->component.service_step = gnss_um980_service_step;
+
+    /* NAV-FIX-001 AP-B: Register fast path hooks for 100 Hz on Core 1 */
+    rx->component.fast_input   = gnss_um980_fast_input;
+    rx->component.fast_process = gnss_um980_fast_process;
 }
 
 void gnss_um980_set_rx_source(gnss_um980_t* rx, byte_ring_buffer_t* source)
@@ -325,4 +329,53 @@ bool gnss_um980_is_fresh(const gnss_um980_t* rx)
         return false;
     }
     return rx->snapshot.fresh;
+}
+
+/* ---- NAV-FIX-001 AP-B: Fast Path Hooks (Core 1, 100 Hz) ---- */
+
+void gnss_um980_fast_input(runtime_component_t* comp, const fast_cycle_context_t* ctx)
+{
+    gnss_um980_t* rx = (gnss_um980_t*)comp;
+    if (rx == NULL || rx->rx_source == NULL) {
+        return;
+    }
+
+    (void)ctx;  /* timestamp available via ctx->timestamp_us if needed */
+
+    /* Consume bytes from RX source buffer (same logic as service_step) */
+    uint8_t tmp[64];
+    size_t available = byte_ring_buffer_available(rx->rx_source);
+
+    if (available > 0) {
+        size_t to_read = available > sizeof(tmp) ? sizeof(tmp) : available;
+        size_t pulled = byte_ring_buffer_read(rx->rx_source, tmp, to_read);
+        if (pulled > 0) {
+            gnss_um980_feed(rx, tmp, pulled);
+        }
+    }
+}
+
+void gnss_um980_fast_process(runtime_component_t* comp, const fast_cycle_context_t* ctx)
+{
+    gnss_um980_t* rx = (gnss_um980_t*)comp;
+    if (rx == NULL) {
+        return;
+    }
+
+    uint64_t ts_ms = ctx->timestamp_us / 1000;
+    rx->last_service_ms = ts_ms;
+
+    /* Rebuild snapshot if any sentence type was updated by fast_input */
+    if (rx->gga_dirty || rx->rmc_dirty || rx->gst_dirty) {
+        gnss_um980_rebuild_snapshot(rx, ts_ms);
+    }
+
+    /* Always check freshness (even when no new data) */
+    bool was_fresh = rx->snapshot.fresh;
+    gnss_snapshot_check_freshness(&rx->snapshot, ts_ms, rx->freshness_timeout_ms);
+
+    /* Count timeout transitions (fresh → stale) */
+    if (was_fresh && !rx->snapshot.fresh && rx->snapshot.valid) {
+        rx->timeout_events++;
+    }
 }

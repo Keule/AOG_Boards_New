@@ -21,6 +21,10 @@ extern "C" {
  * from GNSS and Heading snapshots. Implements strict output gating
  * and stale-data suppression per NAV-AOG-001 Nacharbeit.
  *
+ * NAV-FIX-001-R2: All business logic runs in the 100 Hz Fast Path
+ * (Core 1) via fast_input / fast_process / fast_output hooks.
+ * service_step is NULL — no Core 0 business logic for AOG-NAV.
+ *
  * Inputs (references set by caller, NOT owned):
  *   - Primary GNSS position snapshot (gnss_snapshot_t via snapshot_buffer_t*)
  *   - Heading snapshot (gnss_dual_heading_t via snapshot_buffer_t*)
@@ -28,6 +32,7 @@ extern "C" {
  *
  * Outputs:
  *   - AOG TX frames via byte_ring_buffer_t* (PGN 214, Hello, Scan Reply)
+ *   - PGN214 emitted every fast tick (100 Hz / 10 ms)
  *
  * OUTPUT GATING RULES:
  *   GNSS output suppressed when:
@@ -60,7 +65,7 @@ extern "C" {
  * HEADING_STALE           | from GGA    | sentin  | GNSS OK, heading expired
  * HEADING_LOST            | from GGA    | sentin  | Heading source disappeared
  * SUPPRESSED              | N/A         | N/A     | Output entirely suppressed
- * INIT                     | N/A         | N/A     | Before first service step
+ * INIT                     | N/A         | N/A     | Before first fast tick
  *
  * ---- Heading 3-State Model (FINAL HARDENING) ----
  *
@@ -102,7 +107,7 @@ extern "C" {
  *   Values 3, 6+ → mapped to 0 (NONE)
  */
 typedef enum {
-    AOG_OUTPUT_INIT = 0,         /* Before first service step */
+    AOG_OUTPUT_INIT = 0,         /* Before first fast tick */
     AOG_OUTPUT_OK,               /* GNSS valid+fresh, heading valid+fresh */
     AOG_OUTPUT_GNSS_INVALID,     /* GNSS not valid (no fix) */
     AOG_OUTPUT_GNSS_STALE,       /* GNSS valid but stale (> freshness threshold) */
@@ -135,9 +140,9 @@ typedef struct {
     bool               heading_output_active; /* true: last cycle had valid heading */
     uint32_t           suppress_count;        /* number of suppressed cycles */
 
-    /* AOG send timing */
-    uint32_t           last_aog_send_ms;
-    uint32_t           aog_send_interval_ms;  /* e.g. 50ms = 20 Hz */
+    /* NOTE: aog_send_interval_ms removed in NAV-FIX-001-R2.
+     * PGN214 is emitted every fast tick (100 Hz / 10 ms).
+     * No separate interval gating needed. */
 
     /* Heading freshness tracking */
     uint32_t           heading_freshness_ms;
@@ -166,8 +171,11 @@ typedef struct {
 
 /* Initialize navigation application with defaults.
  * src_address defaults to AOG_SRC_GPS (0x05).
- * send_interval defaults to 50ms (20 Hz).
- * heading_freshness defaults to 3000ms. */
+ * PGN214 output: 100 Hz / 10 ms (every fast tick).
+ * heading_freshness defaults to 3000ms.
+ *
+ * NAV-FIX-001-R2: Registers fast_input/fast_process/fast_output hooks.
+ * service_step is set to NULL — no Core 0 business logic. */
 void aog_nav_app_init(aog_nav_app_t* app);
 
 /* Set input references (NOT owned). Called during wiring by app_core. */
@@ -182,9 +190,30 @@ void aog_nav_app_set_src_address(aog_nav_app_t* app, uint8_t src);
 /* Set heading freshness timeout in ms (clamped). */
 void aog_nav_app_set_heading_freshness(aog_nav_app_t* app, uint32_t timeout_ms);
 
-/* Service step: read inputs, prepare AOG PGN 214 output frames.
- * Called by the runtime service loop. */
+/* ---- Fast Path Hooks (Core 1, 100 Hz) ---- */
+
+/* Fast input: read AOG RX frames, parse Hello/Scan requests.
+ * Called first in the 3-phase fast cycle. */
+void aog_nav_app_fast_input(runtime_component_t* comp, const fast_cycle_context_t* ctx);
+
+/* Fast process: read snapshots, output gating, build PGN 214, write TX.
+ * This is the PRIMARY production business logic path.
+ * Called second in the 3-phase fast cycle. */
+void aog_nav_app_fast_process(runtime_component_t* comp, const fast_cycle_context_t* ctx);
+
+/* Fast output: placeholder for future TX flush or similar.
+ * Called third in the 3-phase fast cycle. Currently no-op. */
+void aog_nav_app_fast_output(runtime_component_t* comp, const fast_cycle_context_t* ctx);
+
+/* ---- Legacy Interface ---- */
+
+/* LEGACY service_step — retained as test-only wrapper.
+ * NOT used in production (service_step = NULL in init).
+ * Delegates to fast_process with a synthetic context.
+ * Host tests may call this for backward compatibility. */
 void aog_nav_app_service_step(runtime_component_t* comp, uint64_t timestamp_us);
+
+/* ---- Utility ---- */
 
 /* Get the runtime_component pointer (for registration). */
 runtime_component_t* aog_nav_app_get_component(aog_nav_app_t* app);

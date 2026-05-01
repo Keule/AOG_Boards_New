@@ -10,11 +10,15 @@ extern "C" {
 
 /* ---- AOG Frame Format (v5 — with Source Byte) ----
  *
+ * BINDING FORMAT (ADR-0006 / NAV-FIX-001 AP-A):
+ *   16-bit PGN (AOG v5) is the authoritative format.
+ *   This repo does NOT support 1-byte PGN format.
+ *
  * [0x80][0x81][SRC][PGN_lo][PGN_hi][LEN][DATA_0]..[DATA_n-1][CRC]
  *
  * preamble  : 2 bytes (0x80, 0x81)
  * src       : 1 byte  = source address (0x05 = GPS, 0x06 = IMU, etc.)
- * pgn       : 2 bytes little-endian
+ * pgn       : 2 bytes little-endian (uint16_t, NOT 1 byte)
  * length    : 1 byte  = data_length (payload only)
  * data      : length bytes
  * crc       : 1 byte  = sum(bytes[2..5+length]) mod 256

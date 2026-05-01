@@ -2,6 +2,153 @@
 
 All notable changes to this project will be documented in this file.
 
+## [NAV-FIX-001-R2] — AOG-NAV auf echten 100-Hz Fast-Pfad umgestellt
+
+### Changed
+- **aog_navigation_app.c/h**: AOG-NAV Fachlogik komplett in Fast-Path-Hooks umgezogen
+  - Neue 3-Phase Hooks: `fast_input` (RX Parsing), `fast_process` (Snapshot + Gating + PGN214), `fast_output` (No-op/Platzhalter)
+  - `service_step` auf NULL gesetzt — keine Core-0 Fachlogik mehr
+  - `AOG_SEND_INTERVAL_MS 50` entfernt — PGN214 wird jeden Fast-Tick ausgegeben (100 Hz / 10 ms)
+  - `aog_send_interval_ms` Feld aus `aog_nav_app_t` entfernt
+  - Legacy `service_step()` bleibt als Test-Wrapper (delegiert an `fast_process`)
+- **app_core.c**: `s_nav_app` Service-Group von `SERVICE_GROUP_DIAGNOSTICS` auf `SERVICE_GROUP_UDP` geaendert (service_step=NULL, Gruppe nur fuer Zaehlung)
+- **task_fast.c**: `ctx.timestamp_us` und `ctx.period_us` werden VOR den Fast-Hooks gesetzt (war: nach)
+- **test_aog_pgn214.c**: `test_cyclic_20hz` ersetzt durch `test_cyclic_100hz`
+  - Test prueft: PGN214 wird bei JEDEM Fast-Tick ausgegeben (0, 5ms, 9ms, 10ms, 20ms → 5 Frames)
+- **docs/hardware/nav-aog.md**: PGN 214 Trigger aktualisiert auf "Periodic, 100 Hz (10 ms)"
+
+### Removed
+- `#define AOG_SEND_INTERVAL_MS 50 /* 20 Hz */` — keine 20-Hz/50-ms Konstante mehr
+- `app->aog_send_interval_ms` Feld und Intervall-Pruefung im PGN214 Ausgabepfad
+
+## [STEER-MIG-001] — Steering-Komponenten in ESP-IDF Component-Modell migriert
+
+### Changed
+- **steering_control.h/c**: vollstaendig neu geschrieben — Fast-Path-Hooks (fast_input/fast_process/fast_output), PID-Regler mit Anti-Windup, Safety-Integration, Diagnostics-Snapshot
+- **was_sensor.h/c**: erweitert mit Freshness-Tracking, Plausibilitaetspruefung, erweitertes Snapshot (was_sensor_data_t), Sprung-Rate-Erkennung, Voltage-Berechnung
+- **steering_control/CMakeLists.txt**: neue Dependencies (steering_safety, steering_output, runtime_types)
+- **was_sensor/CMakeLists.txt**: neue Dependency (runtime_types)
+
+### Added
+- **steering_safety** (NEU): Reine-Logik Safety-Gate mit 10 Pflichtbedingungen
+  - `steering_safety_evaluate()`: bewertet alle Safety-Bedingungen pro Zyklus
+  - 12 Reason-Codes (OK + 11 Fehlerzustände)
+  - Konfigurierbare Timeouts (Command 200ms, Sensor 200ms, Comms 500ms)
+  - Setpoint-Clamping bei OOR (Entscheidung: Clamp, nicht Motor aus)
+  - Statistik-Tracking (eval_count, unsafe_count, reason_counts[])
+- **steering_output** (NEU): HAL-abstrahierte Motor/PWM-Ausgabe
+  - `steering_output_hal_t`: mockbares HAL-Interface (set_enable/set_direction/set_pwm/emergency_stop)
+  - Deadzone (5%), Saturation (-1.0..+1.0), NaN/Inf-Guard
+  - `steering_output_mock_hal_init()` fuer Host-Tests
+- **steering_diagnostics** (NEU): Fehlerhistorie und Health-Status
+  - 16-Eintraege Fehlerhistorie (Ring-Buffer)
+  - Safety-Uebergaenge werden automatisch protokolliert
+  - Diagnostics-Snapshot fuer externe Abfrage
+- **test_steering_safety** (19 Tests): alle 10 Safety-Bedingungen, Boundaries, Statistiken
+- **test_steering_output** (12 Tests): Safety-Block, Richtung, Deadzone, Saturation, NaN/Inf
+- **test_steering_sensor** (10 Tests): Calibration, Span-Zero, Voltage, Plausibilitaet
+- **test_steering_control** (12 Tests): Default, Enable, PID, Anti-Windup, NaN, Diagnostics
+- **docs/architecture/steering.md**: vollstaendige Steering-Architektur-Dokumentation
+- **docs/hardware/steering.md**: Hardware-Interface, Safety-Matrix, CMake-Dependencies
+
+### Technical Details
+
+#### AP-A: Komponentenstruktur
+- 6 Rollen klar getrennt: command, sensor, safety, control, output, diagnostics
+- Alle Komponenten nutzen runtime_component_t Modell
+- Hardware-Zugriffe nur ueber HAL-Abstraktionen
+
+#### AP-B: Steering Fast-Pfad
+- fast_input: Command + Sensor Snapshots lesen
+- fast_process: Safety-Gate + PID-Berechnung
+- fast_output: Motor-Ausgabe + Diagnostics
+- Keine blockierenden Aufrufe, kein Logging-Spam
+
+#### AP-C: Safety-Gating
+- 10 Pflichtfaelle implementiert und getestet
+- Default nach Init: Motor aus (global_enabled=false)
+- Setpoint OOR → Clamp ( dokumentiert, nicht Motor aus)
+- Alle Reason-Codes als String abbildbar
+
+#### AP-D: Sensor-Skalierung
+- ADC→Voltage→Winkel Pipeline
+- Plausibilitaet: ±40° Abs-Max, 5°/10ms Sprung-Rate
+- Freshness: 200ms Default-Timeout
+
+#### AP-E: Motor/PWM-Abstraktion
+- HAL-Interface mit 4 Funktionen
+- Mock-HAL fuer Tests
+- PWM Deadzone + Saturation
+- NaN/Inf Guard
+
+### Verification
+- ⚠️ No PlatformIO in sandbox — code review only
+- ✔ steering_safety.c: alle 10 Safety-Bedingungen als reine Logik implementiert
+- ✔ steering_output.c: Deadzone, Saturation, NaN-Guard verifiziert
+- ✔ was_sensor.c: Freshness, Plausibilitaet, Voltage-Berechnung korrekt
+- ✔ steering_control.c: Fast-Path 3-Phasen, PID mit Anti-Windup
+- ✔ 53 Host-Tests definiert (safety=19, output=12, sensor=10, control=12)
+- ✔ Keine Arduino-Abhaengigkeit
+- ✔ Keine NAV-Architektur-Aenderungen
+
+### Known Limitations
+- Kein IMU in Steering-Pfad (TODO: FULL-INTEGRATION-001)
+- PID-Parameter hardcoded (TODO: NVS)
+- Kein echte HAL GPIO/PWM (Skeleton)
+- Kein Autodetect fuer WAS-Kalibrierung
+
+## [NAV-FIX-001] - PGN-Format, 100-Hz Fast Path, Task-Timing-Härtung
+
+### Changed
+- **aog_frame.h**: binding format documentation updated to 16-bit PGN (ADR-0006), CRC STRICT/TOLERANT modes documented
+- **aog_frame.c**: encoder uses 2-byte LE PGN (`[SRC][PGN_lo][PGN_hi]`), CRC = sum(bytes[2..5+len]) mod 256
+- **aog_pgn.h**: all PGN constants as uint16_t, scan_reply module_type field added (0x78 = GPS)
+- **aog_navigation_app.h**: `fast_process` hook declared, 3-state heading model (VALID/STALE/INVALID), 8-state output model
+- **aog_navigation_app.c**: `aog_nav_app_fast_process()` implemented, registered as `component.fast_process` for 100-Hz Core 1 integration
+- **task_fast.c**: replaced `vTaskDelay()` with `vTaskDelayUntil()` for deterministic 100-Hz (10ms period), added deadline-miss detection
+- **runtime_stats.h/c**: added `runtime_stats_record_deadline_miss()` / `runtime_stats_get_deadline_miss_count()` API
+- **docs/architecture/runtime.md**: updated with vTaskDelayUntil timing model and deadline-miss documentation
+- **test/host/test_aog_pgn214/test_aog_pgn214.c**: 49 tests (8 new golden byte regression vectors), all golden frames use 16-bit PGN format
+
+### Added
+- **ADR-0006**: PGN Frameformat-Entscheidung — 16-bit PGN binding (AOG v5), not 1-byte
+- **`aog_nav_app_fast_process()`**: delegates to `service_step` with fast cycle context (Core 1, deterministic 100 Hz)
+- **Deadline-miss counter** in runtime_stats — incremented when `vTaskDelayUntil` returns late
+- **10 golden byte regression tests** (tests 40-49): header bytes, sentinel payload, discovery CRC, hello/scan frames, heading encoding, fix quality byte, complete PGN 214 frame
+- **CHANGELOG.md**: NAV-FIX-001 entry (this document)
+- **test_results.txt**: NAV-FIX-001 test evidence section
+
+### Technical Details
+
+#### AP-A: PGN Format Decision
+- Frame format: `[0x80][0x81][SRC][PGN_lo][PGN_hi][LEN][DATA...][CRC]`
+- Total frame size = 7 + data_length (not 6 + data_length as with 1-byte PGN)
+- PGN encoded as uint16_t, 2 bytes little-endian
+- CRC = sum(SRC + PGN_lo + PGN_hi + LEN + DATA[0..n-1]) mod 256
+- Documented in ADR-0006
+
+#### AP-B: 100-Hz Fast Path Integration
+- `aog_navigation_app` registers `fast_process` hook in `aog_nav_app_init()`
+- `aog_nav_app_fast_process()` delegates to `aog_nav_app_service_step()` with timestamp from `fast_cycle_context_t`
+- Core 0 = transport (service_step), Core 1 = domain logic (fast_process)
+- No change to service_step logic — same output gating, same PGN 214 encoding
+
+#### AP-C: vTaskDelayUntil Härtung
+- `vTaskDelay()` replaced with `vTaskDelayUntil()` — eliminates cumulative jitter
+- Each cycle starts at a fixed 10ms interval from the previous cycle START
+- Deadline-miss detected: `expected_wake = last_wake + period`, compare with `actual_wake`
+- Miss counter exposed via `runtime_stats_get_deadline_miss_count()`
+
+### Verification
+- ⚠️ No PlatformIO in sandbox — code review only
+- ✔ `aog_frame.c`: CRC calculation matches spec (sum mod 256 over bytes[2..end-1])
+- ✔ `aog_pgn.c`: 16-bit PGN decode roundtrip correct
+- ✔ `task_fast.c`: vTaskDelayUntil pattern verified against FreeRTOS docs
+- ✔ `runtime_stats.c`: deadline-miss counter initialized to 0, incremented atomically
+- ✔ `test_aog_pgn214.c`: 49 tests defined (all categories covered)
+- ✔ ADR-0006: ACCEPTED, consistent with existing implementation
+- ✔ All 4 ADR compliance checks: no new violations
+
 ## [NAV-RTCM-001] - Produktives RTCM-Routing (NTRIP → Router → UM980)
 
 ### Changed

@@ -126,8 +126,17 @@ void gnss_um980_finalize_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms);
 
 /* Service step: consume bytes from rx_source, parse NMEA,
  * rebuild snapshot, check freshness.
- * Called by the runtime service loop. */
+ * Called by the runtime service loop (Core 0). */
 void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us);
+
+/* ---- Fast Path Hooks (NAV-FIX-001 AP-B) ----
+ * Called from task_fast on Core 1 at 100 Hz.
+ * fast_input:  consume bytes from rx_source, parse NMEA.
+ * fast_process: rebuild snapshot if dirty, check freshness.
+ * These allow GNSS processing at deterministic 100 Hz on Core 1. */
+
+void gnss_um980_fast_input(runtime_component_t* comp, const fast_cycle_context_t* ctx);
+void gnss_um980_fast_process(runtime_component_t* comp, const fast_cycle_context_t* ctx);
 
 /* Get pointer to latest GGA data. NULL if not valid. */
 const nmea_gga_t* gnss_um980_get_gga(const gnss_um980_t* rx);

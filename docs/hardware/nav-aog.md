@@ -79,7 +79,7 @@ The AOG output layer translates raw GNSS position fixes and heading measurements
 
 | PGN | Hex | Name | Direction | Trigger |
 |-----|-----|------|-----------|---------|
-| 214 | 0xD6 | Primary GPS + Heading | Module → AOG | Periodic, 20 Hz |
+| 214 | 0xD6 | Primary GPS + Heading | Module → AOG | Periodic, 100 Hz (10 ms) |
 | 254 | 0xFE | Hello Response | Module → AOG | On PGN 253 request |
 | 203 | 0xCB | Scan Reply | Module → AOG | On PGN 202 request |
 

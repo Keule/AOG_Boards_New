@@ -1,127 +1,168 @@
 #pragma once
 
-/* steering_control.h — AOG steering command processor.
+/* steering_control.h — Steering Controller (STEER-MIG-001 AP-B/C)
  *
- * Consumes:
- *   - SteeringInput snapshot (from aog_steering_app via snapshot_buffer_t)
- *   - WAS snapshot (from was_sensor)
- *   - IMU snapshot (from imu_bno085)
+ * Reads command and sensor snapshots, evaluates safety, computes
+ * PID output, and drives the motor via steering_output.
  *
- * Produces:
- *   - steering_command_t snapshot for the actuator layer
- *   - safety_failsafe_feed() when a valid command with valid sensors is produced
+ * Fast-path integration:
+ *   fast_input:  read command + sensor snapshots, read enable switches
+ *   fast_process: safety gate evaluation, PID computation, saturation
+ *   fast_output: motor output via steering_output, diagnostics
+ *
+ * Depends on: runtime_component.h, runtime_types.h, snapshot_buffer.h,
+ *             steering_safety.h, steering_output.h
  *
  * This component does NOT:
- *   - read AOG RX directly (aog_steering_app owns parsing)
- *   - parse AOG frames
+ *   - call HAL functions directly (via steering_output HAL)
  *   - call transport functions
- *   - call HAL functions
+ *   - parse AOG frames (aog_steering_app does that)
  *   - use heap allocation
- *
- * No Arduino, no heap, no HAL, no transport.
- * Depends on: runtime_component.h, snapshot_buffer.h, aog_pgn.h
  */
 
 #include <stdint.h>
 #include <stdbool.h>
 
 #include "runtime_component.h"
+#include "runtime_types.h"
 #include "snapshot_buffer.h"
 #include "aog_pgn.h"
-#include "safety_failsafe.h"
+#include "steering_safety.h"
+#include "steering_output.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* ---- WAS sensor data layout (must match was_sensor.h).
- * Duplicated here to avoid pulling in was_sensor.h as a dependency. */
-typedef struct {
-    uint16_t raw;       /**< ADC raw reading */
-    float degrees;      /**< Calibrated angle in degrees */
-    bool valid;         /**< True when conversion succeeded */
-} steer_was_data_t;
-
-/* ---- IMU data layout (must match imu_bno085.h).
- * Duplicated here to avoid pulling in imu_bno085.h as a dependency. */
-typedef struct {
-    double heading_rad;
-    double roll_rad;
-    double yawrate_rad_s;
-    bool valid;
-} steer_imu_data_t;
-
-/* ---- Steering command (output) ---- */
+/* ---- PID Configuration ---- */
 
 typedef struct {
-    float steer_angle_deg;        /**< Commanded angle from AOG (setpoint) */
-    float steer_angle_actual_deg; /**< Actual angle from WAS (feedback) */
-    float speed_ms;               /**< Vehicle speed from AOG */
-    float heading_error_deg;      /**< Heading error from IMU (compensation) */
-    uint8_t status;               /**< 0 = inactive, 1 = active */
-    bool valid;                   /**< True when a valid command is available */
-    bool sensors_valid;           /**< True when WAS + IMU data are both valid */
-} steering_command_t;
+    float kp;          /**< Proportional gain */
+    float ki;          /**< Integral gain */
+    float kd;          /**< Derivative gain */
+    float integral_max; /**< Anti-windup: max integral accumulation */
+    float output_min;  /**< Minimum output (PWM) */
+    float output_max;  /**< Maximum output (PWM) */
+    uint64_t dt_us;    /**< Cycle time in microseconds (10000 = 10ms @100Hz) */
+} steer_pid_config_t;
 
-/* ---- Main component struct ---- */
+/* ---- Diagnostics snapshot ---- */
+
+typedef struct {
+    float setpoint_deg;          /**< Current setpoint (after clamping) */
+    float actual_deg;            /**< Current actual angle from WAS */
+    float error_deg;             /**< Current error (setpoint - actual) */
+    float pid_output;            /**< Raw PID output before saturation */
+    float saturated_output;      /**< Output after saturation */
+    float integral;              /**< Current integral accumulator */
+    bool safety_ok;              /**< Safety gate result */
+    steer_safety_reason_t safety_reason;  /**< Safety reason code */
+    uint64_t timestamp_us;       /**< Timestamp of this evaluation */
+    uint32_t cycle_count;        /**< Total fast-path cycles */
+    uint32_t safety_block_count; /**< Total safety blocks */
+} steer_diag_snapshot_t;
+
+/* ---- Main steering controller struct ---- */
 
 typedef struct {
     runtime_component_t component;    /**< MUST be first field */
 
     /* Input sources (NOT owned, set by caller) */
-    const snapshot_buffer_t* steer_input_source;  /**< SteeringInput from aog_steering_app */
-    const snapshot_buffer_t* was_source;           /**< was_sensor snapshot */
-    const snapshot_buffer_t* imu_source;           /**< imu_bno085 snapshot */
+    const snapshot_buffer_t* steer_input_source;  /**< aog_steer_input_t from aog_steering_app */
+    const snapshot_buffer_t* was_source;           /**< was_sensor_data_t from was_sensor */
 
-    /* Safety feed target (NOT owned, set by caller).
-     * When a valid command with valid sensors is produced,
-     * steering_control feeds this watchdog instance. */
-    safety_failsafe_t* safety_target;
+    /* Safety gate */
+    steering_safety_t safety;
 
-    /* Cached sensor data (from last service_step) */
-    steer_was_data_t was_data;
-    steer_imu_data_t imu_data;
-    bool was_valid;
-    bool imu_valid;
+    /* Motor output */
+    steering_output_t output;
 
-    /* Command being built (written during service_step) */
-    steering_command_t command;
+    /* PID controller state */
+    steer_pid_config_t pid_config;
+    float integral;
+    float prev_error;
+    bool pid_initialized;
 
-    /* Snapshot for actuator consumption */
-    snapshot_buffer_t command_snapshot;
-    steering_command_t command_storage;
+    /* Command tracking for freshness */
+    uint64_t last_command_timestamp_us;
+
+    /* Diagnostics */
+    steer_diag_snapshot_t diag;
+    snapshot_buffer_t diag_snapshot;
+    steer_diag_snapshot_t diag_storage;
+
+    /* Statistics */
+    uint32_t fast_cycle_count;
 } steering_control_t;
 
 /* ---- API ---- */
 
-/** Zero-initialise the component and set its service_step callback. */
+/** Initialize steering controller.
+ *  Sets up safety gate (OFF), motor output (OFF), PID (defaults).
+ *  Registers fast_input, fast_process, fast_output hooks. */
 void steering_control_init(steering_control_t* ctrl);
 
 /** Bind the SteeringInput snapshot source (NOT owned).
- *  This is the ONLY AOG data input — no direct RX buffer access. */
+ *  Source is aog_steer_input_t from aog_steering_app. */
 void steering_control_set_steer_input(steering_control_t* ctrl,
                                       const snapshot_buffer_t* source);
 
-/** Bind the WAS snapshot source (NOT owned). */
+/** Bind the WAS snapshot source (NOT owned).
+ *  Source is was_sensor_data_t from was_sensor. */
 void steering_control_set_was(steering_control_t* ctrl,
                               const snapshot_buffer_t* was);
 
-/** Bind the IMU snapshot source (NOT owned). */
-void steering_control_set_imu(steering_control_t* ctrl,
-                              const snapshot_buffer_t* imu);
+/** Set PID configuration. */
+void steering_control_set_pid(steering_control_t* ctrl,
+                              float kp, float ki, float kd,
+                              float integral_max,
+                              float output_min, float output_max);
 
-/** Bind the safety failsafe target (NOT owned).
- *  steering_control will call safety_failsafe_feed() on this instance
- *  whenever a valid command with valid sensors is produced. */
-void steering_control_set_safety_target(steering_control_t* ctrl,
-                                        safety_failsafe_t* sf);
+/** Configure safety gate timeouts. */
+void steering_control_set_safety_timeouts(steering_control_t* ctrl,
+                                           uint64_t command_us,
+                                           uint64_t sensor_us,
+                                           uint64_t comms_us);
 
-/** Service-step callback (also callable directly). */
+/** Set global steering enable. Must be called to enable steering. */
+void steering_control_set_global_enabled(steering_control_t* ctrl, bool enabled);
+
+/** Set local steering switch. */
+void steering_control_set_local_switch(steering_control_t* ctrl, bool on);
+
+/** Set motor output HAL (for test injection). */
+void steering_control_set_output_hal(steering_control_t* ctrl,
+                                      steering_output_hal_t* hal);
+
+/** Set motor output deadzone. */
+void steering_control_set_output_deadzone(steering_control_t* ctrl, float deadzone);
+
+/** Fast input hook: read command + sensor snapshots. */
+void steering_control_fast_input(runtime_component_t* comp,
+                                  const fast_cycle_context_t* ctx);
+
+/** Fast process hook: safety gate + PID computation. */
+void steering_control_fast_process(runtime_component_t* comp,
+                                    const fast_cycle_context_t* ctx);
+
+/** Fast output hook: motor output + diagnostics. */
+void steering_control_fast_output(runtime_component_t* comp,
+                                   const fast_cycle_context_t* ctx);
+
+/** Service step (fallback, delegates to fast hooks with synthetic context). */
 void steering_control_service_step(runtime_component_t* comp,
                                    uint64_t timestamp_us);
 
-/** Return a read-only pointer to the command snapshot. */
-const snapshot_buffer_t* steering_control_get_command_snapshot(
+/** Get diagnostics snapshot buffer (for external consumption). */
+const snapshot_buffer_t* steering_control_get_diag_snapshot(
+    const steering_control_t* ctrl);
+
+/** Get safety gate reference (for external inspection). */
+const steering_safety_t* steering_control_get_safety(
+    const steering_control_t* ctrl);
+
+/** Get output reference (for external inspection). */
+const steering_output_t* steering_control_get_output(
     const steering_control_t* ctrl);
 
 #ifdef __cplusplus

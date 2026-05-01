@@ -3,7 +3,7 @@
 ## Core 1
 
 - task_fast MUSS deterministisch laufen.
-- task_fast MUSS einen festen Zyklus haben.
+- task_fast MUSS einen festen Zyklus haben (100 Hz, 10ms Periode).
 - task_fast MUSS folgenden Ablauf haben:
   - fast_input
   - fast_process
@@ -14,6 +14,18 @@
 - task_fast DARF NICHT Ethernet-SPI verwenden.
 - task_fast ist mode-frei (kein Work/Config-Einfluss auf Priorität/Frequenz).
 - FastCycleContext enthält KEIN service_profile.
+
+### Timing: vTaskDelayUntil (NAV-FIX-001 AP-C)
+
+- task_fast verwendet `vTaskDelayUntil()` statt `vTaskDelay()`.
+- `vTaskDelay()` hat kumulativen Jitter: jeder Zyklus startet 10ms NACH
+  dem Ende des vorherigen Zyklus (nicht 10ms nach dem Start).
+- `vTaskDelayUntil()` startet jeden Zyklus in einem festen Intervall vom
+  vorherigen Zyklus-START, eliminiert Jitter-Akkumulation.
+- Periode: `pdMS_TO_TICKS(10)` = 10ms = 100 Hz.
+- Deadline-Miss-Erkennung: wenn `actual_wake > expected_wake`, wird
+  `runtime_stats_record_deadline_miss()` inkrementiert.
+- Deadline-Miss-Zähler abrufbar via `runtime_stats_get_deadline_miss_count()`.
 
 ## Core 0
 

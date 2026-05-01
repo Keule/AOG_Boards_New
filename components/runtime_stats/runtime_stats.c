@@ -8,6 +8,9 @@ static uint32_t s_count = 0;
 static uint32_t s_last = 0;
 static uint32_t s_worst = 0;
 
+/* NAV-FIX-001 AP-C: Deadline miss counter */
+static uint32_t s_deadline_miss_count = 0;
+
 void runtime_stats_init(void)
 {
     uint32_t i = 0;
@@ -20,6 +23,7 @@ void runtime_stats_init(void)
     s_count = 0;
     s_last = 0;
     s_worst = 0;
+    s_deadline_miss_count = 0;
 }
 
 void runtime_stats_record(uint32_t cycle_duration_us)
@@ -53,4 +57,16 @@ uint32_t runtime_stats_get_last(void)
 uint32_t runtime_stats_get_worst(void)
 {
     return s_worst;
+}
+
+/* NAV-FIX-001 AP-C: Deadline miss tracking */
+
+void runtime_stats_record_deadline_miss(void)
+{
+    s_deadline_miss_count++;
+}
+
+uint32_t runtime_stats_get_deadline_miss_count(void)
+{
+    return s_deadline_miss_count;
 }

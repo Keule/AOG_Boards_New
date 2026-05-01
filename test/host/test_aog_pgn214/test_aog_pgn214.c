@@ -1,7 +1,7 @@
 /* ========================================================================
- * test_aog_pgn214 — Host tests for NAV-AOG-001-FINAL
+ * test_aog_pgn214 — Host tests for NAV-AOG-001-FINAL / NAV-FIX-001-R2
  *
- * Validates all 16 mandatory test cases plus additional regression tests:
+ * Validates all mandatory test cases plus additional regression tests:
  *
  * FRAME FORMAT & ENCODING:
  *  1.  PGN 214 frame format (v5: preamble, SRC, PGN, LEN, payload, CRC)
@@ -44,7 +44,7 @@
  * 30.  Module type = 0x78 (AOG_MODULE_TYPE_GPS) in Scan Reply
  *
  * TIMING & DETERMINISM:
- * 31.  Deterministic cyclic output (20 Hz)
+ * 31.  Deterministic cyclic output (100 Hz / 10 ms)
  *
  * DATA CONVERSION (P5):
  * 32.  Heading normalization (rad→deg, 0-360)
@@ -1169,36 +1169,44 @@ void test_module_type_initialized(void)
  * ======================================================================== */
 
 /* ========================================================================
- * 31. Deterministic cyclic output (20 Hz)
+ * 31. Deterministic cyclic output (100 Hz / 10 ms)
+ *
+ * NAV-FIX-001-R2: PGN214 is emitted every fast tick (100 Hz).
+ * No interval gating — every call to fast_process produces a frame.
  * ======================================================================== */
 
-void test_cyclic_20hz(void)
+void test_cyclic_100hz(void)
 {
     set_valid_gnss_snapshot();
     set_valid_heading_snapshot(M_PI);
 
-    /* t=0ms: first output */
+    /* t=0us: first fast tick → output */
     aog_nav_app_service_step(&s_app.component, 0);
     TEST_ASSERT_EQUAL(58, byte_ring_buffer_available(&s_tx_buf));
     drain_tx();
 
-    /* t=49ms: no output yet */
-    aog_nav_app_service_step(&s_app.component, 49000);
-    TEST_ASSERT_EQUAL(0, byte_ring_buffer_available(&s_tx_buf));
-
-    /* t=50ms: output */
-    aog_nav_app_service_step(&s_app.component, 50000);
+    /* t=5000us (5ms): next fast tick → output (every tick = 100 Hz) */
+    aog_nav_app_service_step(&s_app.component, 5000);
     TEST_ASSERT_EQUAL(58, byte_ring_buffer_available(&s_tx_buf));
     drain_tx();
 
-    /* t=99ms: no output */
-    aog_nav_app_service_step(&s_app.component, 99000);
-    TEST_ASSERT_EQUAL(0, byte_ring_buffer_available(&s_tx_buf));
-
-    /* t=100ms: output */
-    aog_nav_app_service_step(&s_app.component, 100000);
+    /* t=9000us (9ms): next fast tick → output */
+    aog_nav_app_service_step(&s_app.component, 9000);
     TEST_ASSERT_EQUAL(58, byte_ring_buffer_available(&s_tx_buf));
     drain_tx();
+
+    /* t=10000us (10ms): next fast tick → output */
+    aog_nav_app_service_step(&s_app.component, 10000);
+    TEST_ASSERT_EQUAL(58, byte_ring_buffer_available(&s_tx_buf));
+    drain_tx();
+
+    /* t=20000us (20ms): next fast tick → output */
+    aog_nav_app_service_step(&s_app.component, 20000);
+    TEST_ASSERT_EQUAL(58, byte_ring_buffer_available(&s_tx_buf));
+    drain_tx();
+
+    /* Verify we emitted 5 PGN214 frames total */
+    TEST_ASSERT_EQUAL(5, s_app.pgn214_send_count);
 }
 
 /* ========================================================================
@@ -1929,7 +1937,7 @@ int main(void)
     RUN_TEST(test_module_type_initialized);
 
     /* ---- Timing & determinism ---- */
-    RUN_TEST(test_cyclic_20hz);
+    RUN_TEST(test_cyclic_100hz);
 
     /* ---- Data conversion (P5) ---- */
     RUN_TEST(test_heading_normalization);

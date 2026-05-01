@@ -16,15 +16,27 @@ static void task_fast(void* arg)
     runtime_watchdog_init();
     runtime_watchdog_register_task("task_fast");
 
+    /* NAV-FIX-001 AP-C: vTaskDelayUntil for deterministic 100 Hz (10ms period).
+     * vTaskDelay() causes cumulative jitter — each cycle starts 10ms AFTER
+     * the previous cycle ENDED, not 10ms after it STARTED.
+     * vTaskDelayUntil() starts each cycle at a fixed interval from the
+     * previous cycle START, eliminating jitter accumulation. */
+    TickType_t last_wake_time = xTaskGetTickCount();
+    const TickType_t period_ticks = pdMS_TO_TICKS(10);
+
     while (1) {
         int64_t cycle_start_us = esp_timer_get_time();
-        int64_t cycle_end_us = 0;
-        uint32_t cycle_duration_us = 0;
         size_t component_count = runtime_component_count();
         size_t i = 0;
 
+        /* NAV-FIX-001-R2 AP-D: Set timestamp and period BEFORE fast hooks.
+         * Components need valid ctx.timestamp_us and ctx.period_us
+         * during their fast_input/fast_process/fast_output callbacks. */
+        ctx.timestamp_us = (uint64_t)cycle_start_us;
+        ctx.period_us = 10000U;
         ctx.cycle_id++;
 
+        /* ---- Phase 1: fast_input ---- */
         for (i = 0; i < component_count; i++) {
             runtime_component_t* component = runtime_component_get(i);
 
@@ -33,6 +45,7 @@ static void task_fast(void* arg)
             }
         }
 
+        /* ---- Phase 2: fast_process ---- */
         for (i = 0; i < component_count; i++) {
             runtime_component_t* component = runtime_component_get(i);
 
@@ -41,6 +54,7 @@ static void task_fast(void* arg)
             }
         }
 
+        /* ---- Phase 3: fast_output ---- */
         for (i = 0; i < component_count; i++) {
             runtime_component_t* component = runtime_component_get(i);
 
@@ -49,21 +63,30 @@ static void task_fast(void* arg)
             }
         }
 
-        cycle_end_us = esp_timer_get_time();
+        /* ---- Post-hook measurements ---- */
+        int64_t cycle_end_us = esp_timer_get_time();
 
         if (cycle_end_us >= cycle_start_us) {
-            cycle_duration_us = (uint32_t)(cycle_end_us - cycle_start_us);
+            uint32_t cycle_duration_us = (uint32_t)(cycle_end_us - cycle_start_us);
+            runtime_stats_record(cycle_duration_us);
         }
 
-        runtime_stats_record(cycle_duration_us);
-        ctx.timestamp_us = (uint64_t)cycle_end_us;
-        ctx.period_us = 10000U;
         ctx.last_cycle_duration_us = runtime_stats_get_last();
         ctx.worst_cycle_duration_us = runtime_stats_get_worst();
 
         runtime_watchdog_feed("task_fast");
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        /* NAV-FIX-001 AP-C: Deadline miss detection.
+         * Record expected wake time BEFORE the delay, then check actual
+         * wake time AFTER. If actual > expected, we missed the deadline. */
+        TickType_t expected_wake = last_wake_time + period_ticks;
+
+        vTaskDelayUntil(&last_wake_time, period_ticks);
+
+        TickType_t actual_wake = xTaskGetTickCount();
+        if (actual_wake > expected_wake) {
+            runtime_stats_record_deadline_miss();
+        }
     }
 }
 
