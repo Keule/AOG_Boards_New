@@ -52,7 +52,7 @@ static void push_aog_pgn(aog_steering_app_t* app, uint16_t pgn,
     }
 
     uint8_t frame[AOG_MAX_FRAME_SIZE];
-    size_t frame_len = aog_frame_encode(frame, pgn, data, data_len);
+    size_t frame_len = aog_frame_encode(frame, app->src_address, pgn, data, data_len);
     if (frame_len > 0 && app->aog_tx_dest != NULL) {
         byte_ring_buffer_write(app->aog_tx_dest, frame, frame_len);
     }
@@ -67,6 +67,8 @@ void aog_steering_app_init(aog_steering_app_t* app)
     }
 
     memset(app, 0, sizeof(aog_steering_app_t));
+
+    app->src_address = AOG_SRC_STEER;   /* default: steering source (0x07) */
 
     aog_parser_init(&app->aog_parser);
 
@@ -94,6 +96,14 @@ void aog_steering_app_set_aog_tx_dest(aog_steering_app_t* app,
         return;
     }
     app->aog_tx_dest = dest;
+}
+
+void aog_steering_app_set_src_address(aog_steering_app_t* app, uint8_t src)
+{
+    if (app == NULL) {
+        return;
+    }
+    app->src_address = src;
 }
 
 void aog_steering_app_service_step(runtime_component_t* comp,

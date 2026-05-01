@@ -26,6 +26,25 @@ extern "C" {
  *   0x05 = GPS / Position module
  *   0x06 = IMU module
  *   0x07 = Steering module
+ *
+ * ---- CRC Validation Modes (NAV-AOG-001 FINAL HARDENING) ----
+ *
+ * STRICT MODE (Core PGNs: 214, 200, 201, 252):
+ *   - Header: 0x80 0x81 exact
+ *   - Source: any value accepted
+ *   - Payload length: must match frame_length - 7
+ *   - CRC: exact sum(bytes[2..end-1]) mod 256 required
+ *   - Frame length: must equal 7 + payload_length
+ *
+ * TOLERANT MODE (Discovery PGNs: 202, 203, 253, 254):
+ *   - Header: 0x80 0x81 exact
+ *   - Source: any value accepted
+ *   - Payload length: must match
+ *   - CRC: accepts (1) exact match, (2) CRC==0x00, (3) off by ±1
+ *   - Rationale: AgIO/AOG Discovery can have uninitialized CRC or UDP noise
+ *   - CRITICAL: Discovery MUST NOT block module detection via over-validation
+ *
+ * TX (outgoing): ALWAYS STRICT — no tolerance on our own frames
  */
 
 #define AOG_PREAMBLE_1          0x80
@@ -90,16 +109,20 @@ size_t aog_frame_encode(uint8_t* buffer, uint8_t src, uint16_t pgn,
                          const uint8_t* data, uint8_t data_length);
 
 /* Verify CRC of a complete v5 frame in memory (STRICT).
+ * Validates: preamble(0x80,0x81), length consistency, exact CRC.
  * frame includes preamble, src, pgn, length, data, and crc.
- * Returns true only if CRC matches exactly.
+ * Returns true only if CRC matches exactly AND frame structure is valid.
  * Use for core PGN output (PGN 214, 200, 201, 252). */
 bool aog_frame_verify_crc(const uint8_t* frame, size_t frame_length);
 
 /* Verify CRC in TOLERANT mode for Discovery frames.
- * Accepts frames where CRC matches OR CRC == 0x00 (known AgIO quirk).
- * Also accepts frames where CRC is off by exactly ±1 (wire noise).
+ * Validates: preamble(0x80,0x81), length consistency.
+ * Accepts CRC if: (1) exact match, (2) CRC==0x00 (known AgIO quirk),
+ * (3) off by exactly ±1 (wire noise on UDP).
+ * Rejects CRC if: off by > ±1 AND not 0x00.
  * Returns true if frame is acceptable under tolerant rules.
- * Use ONLY for Discovery PGNs: 202 (Scan Request), 253 (Hello Request). */
+ * Use ONLY for Discovery PGNs: 202, 203, 253, 254.
+ * NEVER use for Core PGNs: 214, 200, 201. */
 bool aog_frame_verify_crc_tolerant(const uint8_t* frame, size_t frame_length);
 
 /* Check if a PGN is a Discovery PGN (tolerant CRC allowed). */

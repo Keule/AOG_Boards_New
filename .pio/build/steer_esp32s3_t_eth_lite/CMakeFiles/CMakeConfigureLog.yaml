@@ -1,0 +1,12 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/uwe/.platformio/packages/tool-cmake/share/cmake-3.30/Modules/CMakeDetermineSystem.cmake:200 (message)"
+      - "C:/Users/uwe/.platformio/packages/framework-espidf/tools/cmake/project.cmake:590 (__project)"
+      - "CMakeLists.txt:4 (project)"
+    message: |
+      The target system is: Generic -  - 
+      The host system is: Windows - 10.0.26200 - AMD64
