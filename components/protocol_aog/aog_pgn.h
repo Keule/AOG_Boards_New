@@ -81,7 +81,25 @@ typedef struct {
     int16_t  imu_yaw_rate;      /* imu yaw rate (degrees/s) */
 } aog_pgn214_t;
 
-/* ---- AOG Fix Quality (for PGN 214 fix_quality byte) ---- */
+/* ---- AOG Fix Quality (for PGN 214 fix_quality byte) ----
+ *
+ * FINAL HARDENING: Complete mapping table.
+ *
+ * NMEA GGA byte | AOG Output | Label      | Output State Impact
+ * -------------|------------|------------|-----------------------
+ * 0            | 0          | NONE       | GNSS_INVALID (if not valid)
+ * 1            | 1          | GPS        | OK (autonomous fix)
+ * 2            | 2          | DGPS       | OK (differential fix)
+ * 3            | 0          | NONE       | OK but degraded (PPS, not in AOG spec)
+ * 4            | 4          | RTK FIX    | OK (best quality)
+ * 5            | 5          | RTK FLOAT  | OK (degraded RTK)
+ * 6+           | 0          | NONE       | Unknown → treated as no fix
+ *
+ * Special States (not from GGA, but from output gating):
+ *   STALE       → fix_quality = 0 (NONE), full sentinel frame
+ *   INVALID     → fix_quality = 0 (NONE), full sentinel frame
+ *   HEADING LOST → fix_quality from GGA (real), heading = FLT_MAX sentinel
+ */
 
 #define AOG_FIX_NONE           0   /* No fix */
 #define AOG_FIX_GPS            1   /* Autonomous GPS */

@@ -64,6 +64,9 @@ typedef struct {
     aog_steer_status_t steer_status;
     bool hello_response_pending;
 
+    /* Frame source address for outgoing AOG frames (default: AOG_SRC_STEER) */
+    uint8_t src_address;
+
     /* AOG frame parser */
     aog_parser_t aog_parser;
 
@@ -95,6 +98,10 @@ void aog_steering_app_service_step(runtime_component_t* comp,
 
 /* Get the runtime_component pointer (for registration). */
 runtime_component_t* aog_steering_app_get_component(aog_steering_app_t* app);
+
+/* Set the source address used in outgoing AOG frames (default: AOG_SRC_STEER).
+ * Call before starting service if a non-default source is needed. */
+void aog_steering_app_set_src_address(aog_steering_app_t* app, uint8_t src);
 
 /* Get the SteeringInput snapshot buffer (for wiring to steering_control).
  * Returns read-only pointer to the snapshot (NOT the data itself). */

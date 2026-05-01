@@ -46,7 +46,7 @@ extern "C" {
  *
  * IMPORTANT: runtime_component_t MUST be the first field for safe casting. */
 
-/* ---- Output Gating State (NAV-AOG-001-FINAL) ----
+/* ---- Output Gating State (NAV-AOG-001 FINAL HARDENING) ----
  *
  * 8-state model covering all GNSS + Heading combinations.
  * Maps to AOG fix_quality byte and diagnostic output.
@@ -61,6 +61,45 @@ extern "C" {
  * HEADING_LOST            | from GGA    | sentin  | Heading source disappeared
  * SUPPRESSED              | N/A         | N/A     | Output entirely suppressed
  * INIT                     | N/A         | N/A     | Before first service step
+ *
+ * ---- Heading 3-State Model (FINAL HARDENING) ----
+ *
+ * VALID:   heading_dual = real degrees (0-360), heading_output_active = true
+ *          Condition: source present AND valid=true AND fresh (< freshness_ms)
+ *          Action:    Normal heading output in PGN 214
+ *
+ * STALE:   heading_dual = FLT_MAX sentinel, heading_output_active = false
+ *          Condition: source present AND valid=true BUT stale (>= freshness_ms)
+ *          Action:    Suppress heading, send sentinel, keep GNSS alive
+ *          PROHIBITED: last known value, silent fallback, zero heading
+ *
+ * INVALID: heading_dual = FLT_MAX sentinel, heading_output_active = false
+ *          Sub-cases:
+ *            - HEADING_INVALID: source present, valid=false
+ *            - HEADING_LOST: source disappeared entirely (NULL)
+ *          Action:    Suppress heading, send sentinel, keep GNSS alive
+ *          PROHIBITED: last known value, silent fallback, zero heading
+ *
+ * ---- Status/Fix Mapping (FINAL HARDENING) ----
+ *
+ * Internal State   | fix_quality byte | heading_dual    | Notes
+ * -----------------|-------------------|-----------------|--------------------
+ * OK               | from GGA (1/2/4/5)| real (deg)      | Full live data
+ * GNSS_INVALID     | 0 (NONE)          | FLT_MAX sentin  | No fix at all
+ * GNSS_STALE       | 0 (NONE)          | FLT_MAX sentin  | Fix expired
+ * HEADING_INVALID  | from GGA (1/2/4/5)| FLT_MAX sentin  | Heading failure
+ * HEADING_STALE    | from GGA (1/2/4/5)| FLT_MAX sentin  | Heading expired
+ * HEADING_LOST     | from GGA (1/2/4/5)| FLT_MAX sentin  | Source gone
+ * SUPPRESSED       | N/A               | N/A             | All output off
+ * INIT             | N/A               | N/A             | Pre-first-step
+ *
+ * Fix Quality Byte Values (in PGN 214 payload byte 38):
+ *   0 = NONE (no fix, stale, invalid)
+ *   1 = GPS  (autonomous)
+ *   2 = DGPS (differential)
+ *   4 = RTK FIX
+ *   5 = RTK FLOAT
+ *   Values 3, 6+ → mapped to 0 (NONE)
  */
 typedef enum {
     AOG_OUTPUT_INIT = 0,         /* Before first service step */
