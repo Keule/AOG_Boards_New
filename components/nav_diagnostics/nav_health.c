@@ -1,28 +1,12 @@
-/* nav_health.c — NAV Health Snapshot Collector (NAV-DIAG-001 Teil 1)
- *
- * Pollt alle Subsysteme und befüllt den zentralen nav_health_snapshot_t.
- * Nutzt Forward-Declarations, um schwere Header-Abhängigkeiten zu vermeiden.
- * Statt dessen: direkte Field-Zugriffe über bekannte Struct-Layouts.
- */
-
 #include "nav_health.h"
 #include <string.h>
 
 /* ========================================================================
- * Internal: Subsystem field access via lightweight accessor headers.
+ * nav_health.c — NAV Health Snapshot Collector (NAV-DIAG-001 Teil 1)
  *
- * Wir inkludieren nur die Header die für die Felder nötig sind.
- * Forward-decl Structs reichen für Pointer, aber nicht für Field-Zugriff.
- * Daher inkludieren wir die nötigen Header hier im .c File.
+ * Types are resolved via nav_health.h which includes the real component
+ * headers. No additional includes needed for type access.
  * ======================================================================== */
-
-#include "transport_uart.h"    /* transport_uart_stats_t */
-#include "gnss_um980.h"        /* gnss_um980_t fields */
-#include "gnss_dual_heading.h" /* gnss_dual_heading_calc_t fields */
-#include "ntrip_client.h"      /* ntrip_state_t mapping */
-#include "rtcm_router.h"       /* rtcm_router_get_stats */
-#include "aog_navigation_app.h" /* aog_output_state_t, aog_nav_app_t fields */
-#include "transport_tcp.h"     /* transport_tcp_t fields */
 
 /* ---- Init ---- */
 

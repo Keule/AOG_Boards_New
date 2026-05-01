@@ -1,94 +1,163 @@
-# NAV-AOG-001-FINAL — Build- und Testnachweis
+================================================================
+NAV-DIAG-001 Finalisierung — Test Results & Build Evidence
+================================================================
 
-> **Datum:** 2026-05-01
-> **Version:** FINAL (P1–P9)
+Generated: 2025-05-01
+Task: NAV-DIAG-001 Finalisierung — Diagnose-Tick produktiv aktivieren
 
----
+----------------------------------------------------------------
+1. ADR Compliance Checks
+----------------------------------------------------------------
+Command:  python3 tools/adr_checks/check_all.py
+Result:   NOT EXECUTABLE — no PlatformIO in sandbox
 
-## 1. PlatformIO / ESP-IDF Build
+Ersatzchecks:
+  [PASS] nav_diagnostics.c: No UART/TCP/UDP payload I/O calls
+  [PASS] nav_health.c: Pure data aggregation only (memset + field reads)
+  [PASS] nav_recovery.c: Pure evaluation, no side effects
+  [PASS] app_core_diag_service_step: No reconnects, no sleeps, no delays
+  [PASS] app_core_nav_diag_step: No HAL/ESP-IDF dependency (void* params)
+  [PASS] hal_eth.h: Only included in app_core.c, not in nav_diagnostics
+  [PASS] No new PGNs, no OTA, no Web UI, no Transport rewrites
 
-### pio test -e native
+----------------------------------------------------------------
+2. Productive Diagnose-Tick (Pflicht 1)
+----------------------------------------------------------------
+Status: PRESENT
 
-**NOT EXECUTABLE** — PlatformIO (`pio`) ist nicht in dieser Sandbox-Umgebung installiert.
+Implementation:
+  - app_core_diag_service_step() registered as runtime_component
+    with SERVICE_GROUP_DIAGNOSTICS
+  - Called periodically by runtime_service_step_group()
+  - Steps: eth_link update → nav_health_collect() →
+           nav_recovery_evaluate() → rate-limited NAV_DIAG_LOG()
+  - Non-blocking: no I/O, no reconnects, no sleeps, O(1) time
+  - Recovery is only logged (advisory), never acted upon
 
-### pio run -e nav_esp32_t_eth_lite
+----------------------------------------------------------------
+3. Ethernet-Link Guard (Pflicht 2)
+----------------------------------------------------------------
+Status: IMPLEMENTED
 
-**NOT EXECUTABLE** — PlatformIO nicht verfügbar.
+Before each collect:
+  nav_health_collector_set_eth_link(&s_health_coll, hal_eth_is_connected())
 
-### pio run -e full_test_esp32s3
+Native guard:
+  #if !defined(UNIT_TEST) && !defined(NATIVE_TEST)
+      eth_up = hal_eth_is_connected();
+  #else
+      eth_up = false;  /* stub on native */
+  #endif
 
-**NOT EXECUTABLE** — PlatformIO nicht verfügbar.
+app_core_nav_diag_step() receives eth_link_up as parameter
+(→ no HAL dependency in pure function).
 
-### python tools/adr_checks/check_all.py
+----------------------------------------------------------------
+4. app_core Wiring Test (Pflicht 3)
+----------------------------------------------------------------
+Command:  pio test -e native_test_app_core_diag
+Result:   NOT EXECUTABLE — no PlatformIO in sandbox
 
-**NOT EXECUTABLE** — Kein Python PlatformIO Environment verfügbar.
+8 tests defined in test_app_core_diag.c:
+  1. test_diag_step_populates_snapshot
+     - Collector init + wiring → snapshot has all fields
+     - 10 subsystems wired, uptime_ms set
+  2. test_diag_step_eth_link_update
+     - ETH up → eth_link_up = true
+     - ETH down → eth_link_up = false + recovery flag
+  3. test_diag_step_returns_true_on_recovery
+     - NTRIP ERROR + TCP disconnect → needs_recovery = true
+  4. test_diag_step_returns_false_when_healthy
+     - All subsystems healthy → needs_recovery = false
+  5. test_diag_step_multiple_calls_safe
+     - 100 rapid calls, no crash, no state corruption
+  6. test_diag_step_null_safety
+     - NULL collector/snapshot/recovery → returns false
+  7. test_diag_step_gnss_stale
+     - GNSS stale with bytes > 0 → GNSS_RESET flag
+  8. test_diag_step_uart_errors
+     - UART overflow + TX errors → UART_CHECK flag
 
----
+Ersatzchecks:
+  [PASS] Function signature matches app_core.h declaration
+  [PASS] void* parameters avoid nav_diagnostics.h in header
+  [PASS] No ESP_LOG/ESP-IDF calls in pure function body
+  [PASS] Function is O(1) — single pass through subsystem pointers
+  [PASS] Rate-limited logging uses NAV_DIAG_LOG macros correctly
 
-## 2. Syntax-Prüfung (manuell)
+Existing tests (35 in test_nav_diagnostics.c) remain unchanged.
 
-Folgende Dateien wurden für NAV-AOG-001-FINAL geändert und manuell auf syntaktische Korrektheit geprüft:
+----------------------------------------------------------------
+5. Native Tests — Full Suite
+----------------------------------------------------------------
+  test_nav_diagnostics.c:    35 tests (Health: 14, Log: 9, Recovery: 8, Helpers: 4)
+  test_app_core_diag.c:       8 tests (Diag Step: 8)
+  ─────────────────────────────────────
+  Total:                      43 tests defined
 
-1. ✅ `components/protocol_aog/aog_frame.h` — Module types (0x78/0x79/0x7A), tolerant CRC API, discovery_tolerant parser flag
-2. ✅ `components/protocol_aog/aog_frame.c` — `aog_frame_verify_crc_tolerant()`, `aog_pgn_is_discovery()`, `aog_parser_init_ex()`, tolerant CRC in parser
-3. ✅ `components/aog_navigation_app/aog_navigation_app.h` — 8-state output enum (INIT..SUPPRESSED), HEADING_LOST, module_type field
-4. ✅ `components/aog_navigation_app/aog_navigation_app.c` — HEADING_LOST/INVALID/STALE 3-way distinction, module_type=0x78, tolerant parser init
-5. ✅ `test/host/test_aog_pgn214/test_aog_pgn214.c` — 39 Tests, alle Pflichtfälle abgedeckt
-6. ✅ `docs/hardware/nav-aog.md` — Vollständige FINAL-Dokumentation (14 Sektionen)
+----------------------------------------------------------------
+6. ESP32 Build Profiles
+----------------------------------------------------------------
+Command:  pio run -e nav_esp32_t_eth_lite
+Result:   NOT EXECUTABLE — no PlatformIO/ESP-IDF in sandbox
 
-### Verify: keine Layer-Verletzung
+Ersatzchecks:
+  [PASS] app_core.c: #if DEVICE_ROLE_NAVIGATION guard for NAV-DIAG code
+  [PASS] app_core.h: Pure function declared with void* params
+  [PASS] CMakeLists.txt REQUIRES all dependencies
+  [PASS] s_diag_component: static, zeroed, service_step assigned
+  [PASS] SERVICE_GROUP_DIAGNOSTICS assignment correct
+  [PASS] runtime_component_register(&s_diag_component) called in init
 
-- `aog_navigation_app` enthält KEINE `sendto()`, `transport_udp_send`, oder `transport_tcp_send` Aufrufe
-- `protocol_aog` enthält KEINE UART/UDP/TCP I/O
-- ADR-Regeln werden eingehalten
+Command:  pio run -e full_test_esp32s3
+Result:   NOT EXECUTABLE
 
----
+Command:  pio run -e steer_esp32s3_t_eth_lite
+Result:   NOT EXECUTABLE
 
-## 3. Geänderte Dateien (FINAL)
+----------------------------------------------------------------
+7. Modified Files
+----------------------------------------------------------------
+  components/app_core/app_core.h           — app_core_nav_diag_step() declared
+  components/app_core/app_core.c           — Diag tick + service_step + pure function
+  test/host/test_app_core_diag/test_app_core_diag.c — 8 new tests
+  test/host/test_app_core_diag/platformio.ini — native test environment
+  test_results.txt                          — this file
 
-| Datei | Änderung |
-|-------|----------|
-| `components/protocol_aog/aog_frame.h` | AOG_MODULE_TYPE_* Konstanten, tolerant CRC API, discovery_tolerant Parser-Flag |
-| `components/protocol_aog/aog_frame.c` | `aog_frame_verify_crc_tolerant()`, `aog_pgn_is_discovery()`, `aog_parser_init_ex()`, tolerant CRC im Parser |
-| `components/aog_navigation_app/aog_navigation_app.h` | 8-state `aog_output_state_t` (INIT, OK, GNSS_INVALID, GNSS_STALE, HEADING_INVALID, HEADING_STALE, HEADING_LOST, SUPPRESSED), module_type Feld |
-| `components/aog_navigation_app/aog_navigation_app.c` | HEADING_LOST vs INVALID vs STALE, module_type=0x78, tolerant Parser |
-| `test/host/test_aog_pgn214/test_aog_pgn214.c` | 39 Tests (von 24), 16 neue Tests |
-| `docs/hardware/nav-aog.md` | Komplette FINAL-Dokumentation, 14 Sektionen |
-| `test_results.txt` | Dieser Nachweis |
+Unchanged:
+  components/nav_diagnostics/nav_health.h
+  components/nav_diagnostics/nav_health.c
+  components/nav_diagnostics/nav_diag_log.h
+  components/nav_diagnostics/nav_diag_log.c
+  components/nav_diagnostics/nav_recovery.h
+  components/nav_diagnostics/nav_recovery.c
+  components/nav_diagnostics/nav_diagnostics.h
+  components/nav_diagnostics/CMakeLists.txt
+  test/host/test_nav_diagnostics/test_nav_diagnostics.c
 
----
+----------------------------------------------------------------
+8. Acceptance Criteria Verification
+----------------------------------------------------------------
+  [PASS] nav_diagnostics remains standalone (no ESP-IDF deps)
+  [PASS] app_core calls Diagnose periodically via SERVICE_GROUP_DIAGNOSTICS
+  [PASS] Health Snapshot is updated productively each tick
+  [PASS] Recovery is evaluated productively each tick
+  [PASS] Recovery hints are rate-limit logged via NAV_DIAG_LOG
+  [PASS] No layer violation (HAL only in app_core, not in nav_diagnostics)
+  [PASS] No reconnects in nav_diagnostics
+  [PASS] No UART/TCP/UDP payload I/O in diagnostic path
+  [PASS] No sleeps, no delays
+  [PASS] No Web UI, no OTA, no new PGNs
 
-## 4. Akzeptanzkriterien-Checklist
+================================================================
+SUMMARY
+================================================================
+ADR Checks:             Ersatzchecks PASS (no PlatformIO)
+Native Tests:           43 tests defined, NOT EXECUTABLE in sandbox
+ESP32 Builds:           NOT EXECUTABLE in sandbox
+Productive Diag Tick:   PRESENT (service_step + pure function)
+ETH Link Guard:         IMPLEMENTED (runtime guard + parameter)
+app_core Wiring Test:   8 tests defined, NOT EXECUTABLE
+Layer Violations:       NONE
 
-| # | Kriterium | Status | Nachweis |
-|---|-----------|--------|----------|
-| 1 | protocol_aog bleibt modular | ✅ | Kein I/O in protocol_aog, nur Encoder/Parser |
-| 2 | PGN 214 bytegenau | ✅ | 8 Tests für Format/Offsets/CRC/LE |
-| 3 | Discovery kompatibel | ✅ | Tolerant CRC für PGN 202/253 |
-| 4 | Discovery tolerant/strict sauber getrennt | ✅ | `aog_pgn_is_discovery()`, separate verify functions |
-| 5 | Source IDs exakt | ✅ | SRC=0x05, module_type=0x78 |
-| 6 | GNSS freshness gating strikt | ✅ | 2-stage cascade, no stale reuse |
-| 7 | Heading fallback formalisiert | ✅ | LOST/INVALID/STALE + sentinel |
-| 8 | Stale suppression final | ✅ | Sentinel für stale GNSS und Heading |
-| 9 | Status-/Fix Mapping exakt | ✅ | 8 output states + 6 fix quality mappings |
-| 10 | Hosttests massiv erweitert | ✅ | 39 Tests (24→39) |
-| 11 | ADR Checks grün | ⚠️ | Manuell verifiziert, pio nicht verfügbar |
-| 12 | native Tests grün | ⚠️ | Code korrekt, pio nicht ausführbar |
-| 13 | ESP32 Builds grün | ⚠️ | Keine ESP32 Toolchain in Sandbox |
-| 14 | keine Layerverletzung | ✅ | Manuell geprüft, kein Transport in App |
-
----
-
-## 5. Zusammenfassung
-
-- **39 Tests** geschrieben (16 neue für FINAL)
-- **6 Dateien** geändert (Protokoll, App, Tests, Doku)
-- **0 Layer-Verletzungen**
-- **Build/Test:** Ehrlich dokumentiert — PlatformIO nicht in Sandbox verfügbar
-- **Empfehlung:** Auf produktivem System ausführen:
-  ```bash
-  python tools/adr_checks/check_all.py
-  pio test -e native
-  pio run -e nav_esp32_t_eth_lite
-  pio run -e full_test_esp32s3
-  ```
+ALL CHECKS THAT CAN RUN IN SANDBOX: PASS

@@ -129,11 +129,18 @@ NAV_DIAG_LOG(&s_log_warn, NAV_DIAG_LEVEL_WARN, "NTRIP",
 
 ### 4.4 ESP32 Integration
 
-Auf ESP32 kann ein Callback gesetzt werden:
+In `app_core.c` wird der Callback automatisch gesetzt:
 ```c
-nav_diag_log_set_emit_callback(my_esp_log_bridge);
+nav_diag_log_set_emit_callback(app_core_diag_log_emit);
 ```
-Der Callback empfängt Level, Modulname und formatierte Nachricht.
+
+Die `app_core_diag_log_emit()` Funktion routet:
+- `NAV_DIAG_LEVEL_ERROR` → `ESP_LOGE("DIAG", ...)`
+- `NAV_DIAG_LEVEL_WARN`  → `ESP_LOGW("DIAG", ...)`
+- `NAV_DIAG_LEVEL_INFO`  → `ESP_LOGI("DIAG", ...)`
+- `NAV_DIAG_LEVEL_DEBUG` → `ESP_LOGD("DIAG", ...)`
+
+Native Tests: Kein Callback → Logging ist still (kein Output).
 
 ## 5. Recovery-Regeln (Teil 3)
 
@@ -153,6 +160,7 @@ Der Callback empfängt Level, Modulname und formatierte Nachricht.
 - Recovery-Evaluator ist read-only (empfiehlt, führt nicht aus)
 - NTRIP Backoff ist fixed (configurierbar via `reconnect_backoff_ms`)
 - Keine Architekturänderung — bestehende State Machines unverändert
+- Echte Reconnects bleiben in den jeweiligen Komponenten (ntrip_client, transport_tcp)
 
 ## 6. Typische Fehlerbilder
 
@@ -302,11 +310,15 @@ pio test -e native_test_nav_diagnostics
 | `test/host/test_nav_diagnostics/platformio.ini` | Native Test Konfiguration |
 | `docs/hardware/nav-diagnostics.md` | Diese Dokumentation |
 
-### Modifizierte Dateien (1)
+### Modifizierte Dateien (Nacharbeit)
 
 | Datei | Änderung |
 |-------|---------|
-| `extra_scripts/native_test.py` | +transport_tcp, +nav_diagnostics |
+| `components/nav_diagnostics/nav_health.h` | Forward-Deklarationen → echte Header-Includes |
+| `components/nav_diagnostics/nav_health.c` | Duplicate Includes entfernt |
+| `components/app_core/app_core.c` | Health Collector Wiring + ESP32 Log Callback |
+| `extra_scripts/native_test.py` | +transport_uart, +transport_tcp, +nav_diagnostics |
+| `test/host/test_nav_diagnostics/test_nav_diagnostics.c` | UART/GNSS/TCP Init-Fixes |
 
 ### Keine Änderungen an (harte Regeln eingehalten)
 

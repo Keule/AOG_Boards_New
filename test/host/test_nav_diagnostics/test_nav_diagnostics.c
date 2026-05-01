@@ -142,8 +142,8 @@ void test_health_collect_null_subsystems(void)
 /* Test 4: Collect with UART primary */
 void test_health_collect_uart_primary(void)
 {
-    transport_uart_config_t uart_cfg = { .port = BOARD_UART_PORT_PRIMARY, .baudrate = 115200 };
-    transport_uart_init(&s_uart_primary, &uart_cfg);
+    byte_ring_buffer_init(&s_uart_primary.rx_buffer, s_uart_primary.rx_storage, sizeof(s_uart_primary.rx_storage));
+    byte_ring_buffer_init(&s_uart_primary.tx_buffer, s_uart_primary.tx_storage, sizeof(s_uart_primary.tx_storage));
 
     /* Simulate some stats */
     s_uart_primary.stats.rx_bytes_in = 1000;
@@ -166,7 +166,7 @@ void test_health_collect_uart_primary(void)
 /* Test 5: Collect with GNSS primary */
 void test_health_collect_gnss_primary(void)
 {
-    gnss_um980_init(&s_gnss_primary, NULL, BOARD_UART_PORT_PRIMARY);
+    gnss_um980_init(&s_gnss_primary, 0, "GNSS1");
     s_gnss_primary.snapshot.valid = true;
     s_gnss_primary.snapshot.fresh = true;
     s_gnss_primary.sentences_parsed = 500;
@@ -189,7 +189,7 @@ void test_health_collect_gnss_primary(void)
 /* Test 6: Collect with GNSS secondary */
 void test_health_collect_gnss_secondary(void)
 {
-    gnss_um980_init(&s_gnss_secondary, NULL, BOARD_UART_PORT_SECONDARY);
+    gnss_um980_init(&s_gnss_secondary, 1, "GNSS2");
     s_gnss_secondary.snapshot.valid = true;
     s_gnss_secondary.snapshot.fresh = false;
     s_gnss_secondary.sentences_parsed = 300;
@@ -281,8 +281,8 @@ void test_health_collect_aog_nav_app(void)
 /* Test 11: Collect with TCP */
 void test_health_collect_tcp(void)
 {
-    transport_tcp_config_t tcp_cfg = { .remote_ip = 0x01020304, .remote_port = 2101 };
-    transport_tcp_init(&s_tcp, &tcp_cfg);
+    byte_ring_buffer_init(&s_tcp.rx_buffer, s_tcp.rx_storage, sizeof(s_tcp.rx_storage));
+    byte_ring_buffer_init(&s_tcp.tx_buffer, s_tcp.tx_storage, sizeof(s_tcp.tx_storage));
     s_tcp.connected = true;
     byte_ring_buffer_write(&s_tcp.rx_buffer, (const uint8_t*)"AB", 2);
     byte_ring_buffer_write(&s_tcp.tx_buffer, (const uint8_t*)"CD", 2);
@@ -338,11 +338,11 @@ void test_health_error_recording(void)
 void test_health_full_snapshot(void)
 {
     /* Init all subsystems minimally */
-    transport_uart_config_t uart_cfg = { .port = BOARD_UART_PORT_PRIMARY, .baudrate = 115200 };
-    transport_uart_init(&s_uart_primary, &uart_cfg);
+    byte_ring_buffer_init(&s_uart_primary.rx_buffer, s_uart_primary.rx_storage, sizeof(s_uart_primary.rx_storage));
+    byte_ring_buffer_init(&s_uart_primary.tx_buffer, s_uart_primary.tx_storage, sizeof(s_uart_primary.tx_storage));
     s_uart_primary.stats.rx_bytes_in = 100;
 
-    gnss_um980_init(&s_gnss_primary, NULL, BOARD_UART_PORT_PRIMARY);
+    gnss_um980_init(&s_gnss_primary, 0, "GNSS1");
     s_gnss_primary.snapshot.valid = true;
     s_gnss_primary.snapshot.fresh = true;
 
@@ -358,8 +358,8 @@ void test_health_full_snapshot(void)
     s_aog.output_state = AOG_OUTPUT_OK;
     s_aog.pgn214_send_count = 100;
 
-    transport_tcp_config_t tcp_cfg = { .remote_ip = 0, .remote_port = 2101 };
-    transport_tcp_init(&s_tcp, &tcp_cfg);
+    byte_ring_buffer_init(&s_tcp.rx_buffer, s_tcp.rx_storage, sizeof(s_tcp.rx_storage));
+    byte_ring_buffer_init(&s_tcp.tx_buffer, s_tcp.tx_storage, sizeof(s_tcp.tx_storage));
     s_tcp.connected = true;
 
     /* Wire everything */

@@ -30,6 +30,7 @@ def _scan_components(env, proj_dir):
         "nav_rtcm_wiring",
         "protocol_aog",
         "aog_navigation_app",
+        "transport_uart",
         "transport_tcp",
         "nav_diagnostics",
     ]

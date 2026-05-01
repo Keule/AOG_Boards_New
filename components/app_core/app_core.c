@@ -20,6 +20,8 @@
 #include "rtcm_router.h"
 #include "nav_rtcm_wiring.h"
 #include "aog_navigation_app.h"
+#include "nav_diagnostics.h"
+#include "hal_eth.h"
 #endif
 
 /* ---- Steering subsystem includes ----
@@ -74,7 +76,109 @@ static rtcm_router_t   s_rtcm_router;
 
 static aog_nav_app_t   s_nav_app;
 
+static nav_health_collector_t s_health_coll;
+static nav_health_snapshot_t  s_health_snap;
+static nav_recovery_status_t  s_recovery;
+
+/* Rate-limited log entries for diagnostic recovery messages.
+ * WARN level: 1 second interval (default for NAV_DIAG_LEVEL_WARN). */
+static nav_diag_log_entry_t s_log_ntrip  = NAV_DIAG_LOG_ENTRY_INIT(WARN);
+static nav_diag_log_entry_t s_log_tcp    = NAV_DIAG_LOG_ENTRY_INIT(WARN);
+static nav_diag_log_entry_t s_log_eth    = NAV_DIAG_LOG_ENTRY_INIT(WARN);
+static nav_diag_log_entry_t s_log_gnss   = NAV_DIAG_LOG_ENTRY_INIT(WARN);
+static nav_diag_log_entry_t s_log_uart   = NAV_DIAG_LOG_ENTRY_INIT(WARN);
+
+/* ---- NAV-DIAG: ESP32 log bridge ---- */
+static void app_core_diag_log_emit(nav_diag_level_t level,
+                                     const char* module,
+                                     const char* message)
+{
+    switch (level) {
+        case NAV_DIAG_LEVEL_ERROR: ESP_LOGE("DIAG", "[%s] %s", module, message); break;
+        case NAV_DIAG_LEVEL_WARN:  ESP_LOGW("DIAG", "[%s] %s", module, message); break;
+        case NAV_DIAG_LEVEL_INFO:  ESP_LOGI("DIAG", "[%s] %s", module, message); break;
+        case NAV_DIAG_LEVEL_DEBUG: ESP_LOGD("DIAG", "[%s] %s", module, message); break;
+    }
+}
+
+/* ---- NAV-DIAG: Service step callback for runtime integration ----
+ *
+ * Called periodically by runtime_service_step_group(SERVICE_GROUP_DIAGNOSTICS).
+ * This is the productive diagnostic tick.
+ *
+ * Non-blocking requirements met:
+ *   - nav_health_collect: pure data aggregation, no I/O
+ *   - nav_recovery_evaluate: pure state evaluation, no side effects
+ *   - nav_diag_log_emit: rate-limited, may call ESP_LOG (fast)
+ *   - No UART/TCP/UDP payload I/O
+ *   - No reconnects performed (only recommendations logged)
+ *   - No sleeps, no delays
+ *   - O(1) execution time
+ */
+static void app_core_diag_service_step(runtime_component_t* component,
+                                         uint64_t timestamp_us)
+{
+    (void)component;
+
+    /* Get ETH link state (ESP32 only; stub returns false on native). */
+    bool eth_up = false;
+#if !defined(UNIT_TEST) && !defined(NATIVE_TEST)
+    eth_up = hal_eth_is_connected();
 #endif
+
+    /* Call pure diagnostic step (collect + recovery evaluate).
+     * uint64_t uptime_ms = timestamp_us / 1000. */
+    bool needs_recovery = app_core_nav_diag_step(
+        &s_health_coll, &s_health_snap, &s_recovery,
+        timestamp_us / 1000, eth_up);
+
+    /* Rate-limited recovery logging (productive path only).
+     * No reconnects performed — only advisory log messages. */
+    if (!needs_recovery) { return; }
+
+    if (s_recovery.ntrip_should_reconnect) {
+        NAV_DIAG_LOG(&s_log_ntrip, NAV_DIAG_LEVEL_WARN, "NTRIP",
+            "reconnect needed (state=%s, retries=%u)",
+            nav_ntrip_state_name(s_health_snap.ntrip_state),
+            (unsigned)s_recovery.ntrip_consecutive_errors);
+    }
+    if (s_recovery.tcp_disconnected) {
+        NAV_DIAG_LOG(&s_log_tcp, NAV_DIAG_LEVEL_WARN, "TCP",
+            "disconnected (ntrip=%s)",
+            nav_ntrip_state_name(s_health_snap.ntrip_state));
+    }
+    if (s_recovery.eth_link_down) {
+        NAV_DIAG_LOG(&s_log_eth, NAV_DIAG_LEVEL_WARN, "ETH",
+            "link down — recovery needed");
+    }
+    if (s_recovery.gnss_primary_stale || s_recovery.gnss_secondary_stale) {
+        NAV_DIAG_LOG(&s_log_gnss, NAV_DIAG_LEVEL_WARN, "GNSS",
+            "stale (pri=%s sec=%s, pri_bytes=%u sec_bytes=%u)",
+            s_recovery.gnss_primary_stale ? "STALE" : "ok",
+            s_recovery.gnss_secondary_stale ? "STALE" : "ok",
+            (unsigned)s_health_snap.gnss_primary_bytes,
+            (unsigned)s_health_snap.gnss_secondary_bytes);
+    }
+    if (s_recovery.uart_primary_errors || s_recovery.uart_secondary_errors) {
+        NAV_DIAG_LOG(&s_log_uart, NAV_DIAG_LEVEL_WARN, "UART",
+            "errors (pri_ovf=%u pri_tx_err=%u sec_ovf=%u sec_tx_err=%u)",
+            (unsigned)s_health_snap.uart_primary_rx_overflows,
+            (unsigned)s_health_snap.uart_primary_tx_errors,
+            (unsigned)s_health_snap.uart_secondary_rx_overflows,
+            (unsigned)s_health_snap.uart_secondary_tx_errors);
+    }
+}
+
+/* Static runtime_component for diagnostics (must be in .bss, zeroed).
+ * service_step = app_core_diag_service_step
+ * service_group = SERVICE_GROUP_DIAGNOSTICS */
+static runtime_component_t s_diag_component = {
+    .name = "nav_diagnostics",
+    .service_step = app_core_diag_service_step,
+    .service_group = SERVICE_GROUP_DIAGNOSTICS,
+};
+
+#endif /* DEVICE_ROLE_NAVIGATION || DEVICE_ROLE_FULL_TEST */
 
 #if defined(DEVICE_ROLE_STEERING) || defined(DEVICE_ROLE_FULL_TEST)
 
@@ -254,7 +358,7 @@ void app_core_init(void)
         s_rtcm_router.component.service_group    = SERVICE_GROUP_UART;
 
         s_aog_udp.component.service_group        = SERVICE_GROUP_UDP;
-        s_nav_app.component.service_group        = SERVICE_GROUP_DIAGNOSTICS;
+        s_nav_app.component.service_group        = SERVICE_GROUP_UDP;
 
         runtime_component_register(&s_primary_uart.component);
         runtime_component_register(&s_secondary_uart.component);
@@ -267,7 +371,33 @@ void app_core_init(void)
         runtime_component_register(&s_aog_udp.component);
         runtime_component_register(&s_nav_app.component);
 
-        ESP_LOGI(TAG, "Navigation components registered: 10 "
+        /* --- NAV-DIAG: Health collector wiring --- */
+        nav_health_collector_init(&s_health_coll);
+        nav_health_collector_set_uart_primary(&s_health_coll, &s_primary_uart);
+        nav_health_collector_set_uart_secondary(&s_health_coll, &s_secondary_uart);
+        nav_health_collector_set_gnss_primary(&s_health_coll, &s_primary_gnss);
+        nav_health_collector_set_gnss_secondary(&s_health_coll, &s_secondary_gnss);
+        nav_health_collector_set_heading(&s_health_coll, &s_heading);
+        nav_health_collector_set_ntrip(&s_health_coll, &s_ntrip);
+        nav_health_collector_set_rtcm_router(&s_health_coll, &s_rtcm_router);
+        nav_health_collector_set_aog_nav_app(&s_health_coll, &s_nav_app);
+        nav_health_collector_set_tcp(&s_health_coll, &s_ntrip_tcp);
+        nav_health_collector_set_eth_link(&s_health_coll, hal_eth_is_connected());
+
+        /* --- NAV-DIAG: ESP32 log callback --- */
+        nav_diag_log_set_emit_callback(app_core_diag_log_emit);
+
+        /* --- NAV-DIAG: Register diagnostic service component ---
+         * This component's service_step is called periodically by
+         * runtime_service_step_group(SERVICE_GROUP_DIAGNOSTICS).
+         * It performs: eth_link update → health collect → recovery evaluate
+         * → rate-limited recovery logging. */
+        runtime_component_register(&s_diag_component);
+
+        ESP_LOGI(TAG, "NAV-DIAG health collector wired (10 subsystems, "
+                     "diag tick registered in SERVICE_GROUP_DIAGNOSTICS)");
+
+        ESP_LOGI(TAG, "Navigation components registered: 11 "
                  "(uart=%u, udp=%u, tcp_ntrip=%u, diag=%u)",
                  (unsigned)runtime_component_count_group(SERVICE_GROUP_UART),
                  (unsigned)runtime_component_count_group(SERVICE_GROUP_UDP),
@@ -367,4 +497,57 @@ void app_core_start(void)
 {
     runtime_init();
     runtime_start();
+}
+
+/* ========================================================================
+ * app_core_nav_diag_step — Pure diagnostic step (Pflicht 1+2+3)
+ *
+ * Platform-independent, testable, no ESP-IDF dependencies.
+ * Performs three steps:
+ *   1. nav_health_collector_set_eth_link()   — update ETH state
+ *   2. nav_health_collect()                  — aggregate all subsystem health
+ *   3. nav_recovery_evaluate()               — evaluate recovery needs
+ *
+ * Does NOT log — the productive service_step wrapper handles logging.
+ * This separation allows pure testing without log infrastructure.
+ *
+ * Non-blocking guarantees:
+ *   - No I/O, no reconnects, no UART/TCP/UDP payload
+ *   - No sleeps, no delays
+ *   - O(1) execution time
+ *
+ * Parameters:
+ *   collector:   nav_health_collector_t* (void* to avoid nav_diagnostics.h
+ *                in header; cast in .c)
+ *   snapshot:    nav_health_snapshot_t* (output)
+ *   recovery:    nav_recovery_status_t* (output)
+ *   now_ms:      Current uptime in milliseconds
+ *   eth_link_up: Current Ethernet link state (set by caller — no HAL dep)
+ *
+ * Returns: true if recovery actions are recommended. */
+bool app_core_nav_diag_step(void* collector,
+                             void* snapshot,
+                             void* recovery,
+                             uint64_t now_ms,
+                             bool eth_link_up)
+{
+    if (collector == NULL || snapshot == NULL || recovery == NULL) {
+        return false;
+    }
+
+    nav_health_collector_t* coll    = (nav_health_collector_t*)collector;
+    nav_health_snapshot_t*  snap    = (nav_health_snapshot_t*)snapshot;
+    nav_recovery_status_t*  recov   = (nav_recovery_status_t*)recovery;
+
+    /* Pflicht 2: Update Ethernet link state before collection.
+     * Caller provides eth_link_up — no HAL dependency in this function. */
+    nav_health_collector_set_eth_link(coll, eth_link_up);
+
+    /* Pflicht 1: Collect health snapshot (pure data aggregation). */
+    nav_health_collect(coll, snap, now_ms);
+
+    /* Pflicht 1: Evaluate recovery (pure evaluation, no side effects). */
+    nav_recovery_evaluate(snap, recov);
+
+    return nav_recovery_needs_action(recov);
 }

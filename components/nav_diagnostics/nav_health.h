@@ -23,14 +23,19 @@
 extern "C" {
 #endif
 
-/* ---- Forward declarations (avoid heavy header includes) ---- */
-typedef struct transport_uart transport_uart_t;
-typedef struct transport_tcp  transport_tcp_t;
-typedef struct gnss_um980     gnss_um980_t;
-typedef struct ntrip_client   ntrip_client_t;
-typedef struct rtcm_router    rtcm_router_t;
-typedef struct gnss_dual_heading_calc gnss_dual_heading_calc_t;
-typedef struct aog_nav_app    aog_nav_app_t;
+/* ---- Subsystem type includes ----
+ * Pragmatic approach (Option A): include real component headers
+ * to avoid conflicting anonymous typedef forward declarations.
+ * The .c file already includes these for field access.
+ * Only lightweight value-type headers are included here —
+ * no ESP-IDF or HAL dependencies. */
+#include "transport_uart.h"
+#include "transport_tcp.h"
+#include "gnss_um980.h"
+#include "ntrip_client.h"
+#include "rtcm_router.h"
+#include "gnss_dual_heading.h"
+#include "aog_navigation_app.h"
 
 /* ---- NTRIP State mirror (avoids ntrip_client.h dependency) ---- */
 typedef enum {
