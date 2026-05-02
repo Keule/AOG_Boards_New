@@ -1,0 +1,8 @@
+{
+  "name": "actuator_drv8263h",
+  "version": "1.0.0",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "."
+  }
+}

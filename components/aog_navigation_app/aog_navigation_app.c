@@ -431,6 +431,8 @@ void aog_nav_app_service_step(runtime_component_t* comp, uint64_t timestamp_us)
     memset(&synthetic_ctx, 0, sizeof(synthetic_ctx));
     synthetic_ctx.timestamp_us = timestamp_us;
     synthetic_ctx.period_us = 10000U;
+    /* Run full 3-phase fast cycle so RX frames (Discovery) are processed */
+    aog_nav_app_fast_input(comp, &synthetic_ctx);
     aog_nav_app_fast_process(comp, &synthetic_ctx);
 }
 

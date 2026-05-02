@@ -1,0 +1,8 @@
+{
+  "name": "test_mocks",
+  "version": "1.0.0",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "."
+  }
+}

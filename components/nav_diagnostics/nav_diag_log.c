@@ -71,8 +71,10 @@ bool nav_diag_log_emit(nav_diag_log_entry_t* entry,
 
     entry->total_count++;
 
-    /* Rate-limit check */
-    if (entry->interval_ms > 0 && entry->last_emit_ms > 0) {
+    /* Rate-limit check: skip only for the very first call (total_count == 1)
+     * so that a first emit at timestamp_ms == 0 is never suppressed.
+     * Using total_count avoids the edge-case where last_emit_ms == 0. */
+    if (entry->interval_ms > 0 && entry->total_count > 1) {
         if (timestamp_ms > 0 &&
             (timestamp_ms - entry->last_emit_ms) < (uint64_t)entry->interval_ms) {
             /* Suppress this message */

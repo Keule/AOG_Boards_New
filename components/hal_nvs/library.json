@@ -1,0 +1,8 @@
+{
+  "name": "hal_nvs",
+  "version": "1.0.0",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "."
+  }
+}

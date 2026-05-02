@@ -1,0 +1,8 @@
+{
+  "name": "hal_reset",
+  "version": "1.0.0",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "."
+  }
+}

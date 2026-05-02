@@ -37,7 +37,8 @@ void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
         timeout_ms = GNSS_FRESHNESS_TIMEOUT_MS_DEFAULT;
     }
 
-    /* Check GGA freshness → position_valid */
+    /* Check GGA freshness → can only INVALIDATE position_valid.
+     * Validation (setting true) is done by rebuild based on fix quality. */
     if (snap->last_gga_time_ms == 0) {
         /* No GGA ever received */
         snap->position_valid = false;
@@ -51,10 +52,16 @@ void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
         } else {
             gga_age = current_ms - snap->last_gga_time_ms;
         }
-        snap->position_valid = (gga_age <= timeout_ms);
+        if (gga_age > timeout_ms) {
+            /* Stale → invalidate */
+            snap->position_valid = false;
+            snap->status_reason = GNSS_REASON_STALE_GGA;
+        }
+        /* If fresh, leave position_valid as-is (set by rebuild) */
     }
 
-    /* Check RMC freshness → motion_valid */
+    /* Check RMC freshness → can only INVALIDATE motion_valid.
+     * Validation (setting true) is done by rebuild based on RMC status. */
     if (snap->last_rmc_time_ms == 0) {
         /* No RMC ever received */
         snap->motion_valid = false;
@@ -68,7 +75,14 @@ void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
         } else {
             rmc_age = current_ms - snap->last_rmc_time_ms;
         }
-        snap->motion_valid = (rmc_age <= timeout_ms);
+        if (rmc_age > timeout_ms) {
+            /* Stale → invalidate */
+            snap->motion_valid = false;
+            if (snap->status_reason != GNSS_REASON_STALE_GGA) {
+                snap->status_reason = GNSS_REASON_STALE_RMC;
+            }
+        }
+        /* If fresh, leave motion_valid as-is (set by rebuild) */
     }
 
     /* Check GST freshness → accuracy_valid (optional) */
@@ -81,7 +95,10 @@ void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
         } else {
             gst_age = current_ms - snap->last_gst_time_ms;
         }
-        snap->accuracy_valid = (gst_age <= timeout_ms);
+        if (gst_age > timeout_ms) {
+            snap->accuracy_valid = false;
+        }
+        /* If fresh, leave accuracy_valid as-is (set by rebuild) */
     }
 
     /* valid = position_valid AND motion_valid */
@@ -90,16 +107,13 @@ void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
     /* fresh = valid AND no staleness reasons */
     if (!snap->valid) {
         snap->fresh = false;
-        /* Update status_reason for diagnostics */
-        if (!snap->position_valid && snap->last_gga_time_ms > 0) {
-            snap->status_reason = GNSS_REASON_STALE_GGA;
-        } else if (!snap->motion_valid && snap->last_rmc_time_ms > 0) {
-            snap->status_reason = GNSS_REASON_STALE_RMC;
-        }
     } else {
         snap->fresh = true;
         snap->last_error = GNSS_ERR_NONE;
-        snap->status_reason = GNSS_REASON_NONE;
+        if (snap->status_reason == GNSS_REASON_STALE_GGA ||
+            snap->status_reason == GNSS_REASON_STALE_RMC) {
+            snap->status_reason = GNSS_REASON_NONE;
+        }
     }
 }
 

@@ -1,0 +1,8 @@
+{
+  "name": "transport_udp",
+  "version": "1.0.0",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "."
+  }
+}

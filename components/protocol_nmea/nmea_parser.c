@@ -190,40 +190,45 @@ static void nmea_parse_gga(nmea_parser_t* parser, const char* sentence)
     nmea_gga_t* gga = &parser->data.gga;
     memset(gga, 0, sizeof(nmea_gga_t));
 
+    /* Field 0 is the sentence type tag (e.g. "GNGGA"), data fields start at 1.
+     * GGA format: GNGGA,time,lat,N/S,lon,E/W,fix,sats,HDOP,alt,M,geoSep,M,ageDiff,dgpsId */
     uint8_t flen;
+    uint8_t coord_flen;  /* separate length for coordinate fields */
     const char* f;
-
-    f = nmea_get_field(sentence, 0, &flen);
-    gga->utc_time = nmea_parse_double(f, flen);
+    const char* hemi_f;
+    char hemi;
 
     f = nmea_get_field(sentence, 1, &flen);
-    char hemi = nmea_parse_char(nmea_get_field(sentence, 2, &flen), flen);
-    /* Fix: hemisphere from field 2 */
-    const char* hemi_f = nmea_get_field(sentence, 2, &flen);
-    hemi = nmea_parse_char(hemi_f, flen);
-    gga->latitude = nmea_parse_latlon(f, flen, hemi);
+    gga->utc_time = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 3, &flen);
-    hemi_f = nmea_get_field(sentence, 4, &flen);
+    f = nmea_get_field(sentence, 2, &coord_flen);  /* lat */
+    hemi_f = nmea_get_field(sentence, 3, &flen);      /* N/S */
     hemi = nmea_parse_char(hemi_f, flen);
-    gga->longitude = nmea_parse_latlon(f, flen, hemi);
+    gga->latitude = nmea_parse_latlon(f, coord_flen, hemi);
 
-    f = nmea_get_field(sentence, 5, &flen);
-    gga->fix_quality = (uint8_t)nmea_parse_int(f, flen);
+    f = nmea_get_field(sentence, 4, &coord_flen);  /* lon */
+    hemi_f = nmea_get_field(sentence, 5, &flen);      /* E/W */
+    hemi = nmea_parse_char(hemi_f, flen);
+    gga->longitude = nmea_parse_latlon(f, coord_flen, hemi);
 
     f = nmea_get_field(sentence, 6, &flen);
-    gga->num_sats = (uint8_t)nmea_parse_int(f, flen);
+    gga->fix_quality = (uint8_t)nmea_parse_int(f, flen);
 
     f = nmea_get_field(sentence, 7, &flen);
-    gga->hdop = nmea_parse_double(f, flen);
+    gga->num_sats = (uint8_t)nmea_parse_int(f, flen);
 
     f = nmea_get_field(sentence, 8, &flen);
-    gga->altitude = nmea_parse_double(f, flen);
+    gga->hdop = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 10, &flen);
-    gga->geoid_sep = nmea_parse_double(f, flen);
+    f = nmea_get_field(sentence, 9, &flen);
+    gga->altitude = nmea_parse_double(f, flen);
+    /* Field 10 is altitude unit ('M'), skip */
 
     f = nmea_get_field(sentence, 11, &flen);
+    gga->geoid_sep = nmea_parse_double(f, flen);
+    /* Field 12 is geoid unit ('M'), skip */
+
+    f = nmea_get_field(sentence, 13, &flen);
     if (f != NULL && flen > 0) {
         gga->age_diff = nmea_parse_double(f, flen);
         gga->age_diff_valid = true;
@@ -232,7 +237,7 @@ static void nmea_parse_gga(nmea_parser_t* parser, const char* sentence)
         gga->age_diff_valid = false;
     }
 
-    f = nmea_get_field(sentence, 12, &flen);
+    f = nmea_get_field(sentence, 14, &flen);
     gga->diff_station_id = (uint16_t)nmea_parse_int(f, flen);
 }
 
@@ -241,43 +246,46 @@ static void nmea_parse_rmc(nmea_parser_t* parser, const char* sentence)
     nmea_rmc_t* rmc = &parser->data.rmc;
     memset(rmc, 0, sizeof(nmea_rmc_t));
 
+    /* Field 0 is the sentence type tag (e.g. "GNRMC"), data fields start at 1.
+     * RMC format: GNRMC,time,status,lat,N/S,lon,E/W,speed,course,date,magVar,magDir,mode */
     uint8_t flen;
+    uint8_t coord_flen;  /* separate length for coordinate fields */
     const char* f;
     const char* hemi_f;
     char hemi;
 
-    f = nmea_get_field(sentence, 0, &flen);
+    f = nmea_get_field(sentence, 1, &flen);
     rmc->utc_time = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 1, &flen);
+    f = nmea_get_field(sentence, 2, &flen);
     rmc->status_valid = (flen > 0 && f[0] == 'A');
 
-    f = nmea_get_field(sentence, 2, &flen);
-    hemi_f = nmea_get_field(sentence, 3, &flen);
+    f = nmea_get_field(sentence, 3, &coord_flen);  /* lat */
+    hemi_f = nmea_get_field(sentence, 4, &flen);      /* N/S */
     hemi = nmea_parse_char(hemi_f, flen);
-    rmc->latitude = nmea_parse_latlon(f, flen, hemi);
+    rmc->latitude = nmea_parse_latlon(f, coord_flen, hemi);
 
-    f = nmea_get_field(sentence, 4, &flen);
-    hemi_f = nmea_get_field(sentence, 5, &flen);
+    f = nmea_get_field(sentence, 5, &coord_flen);  /* lon */
+    hemi_f = nmea_get_field(sentence, 6, &flen);      /* E/W */
     hemi = nmea_parse_char(hemi_f, flen);
-    rmc->longitude = nmea_parse_latlon(f, flen, hemi);
-
-    f = nmea_get_field(sentence, 6, &flen);
-    rmc->speed_knots = nmea_parse_double(f, flen);
+    rmc->longitude = nmea_parse_latlon(f, coord_flen, hemi);
 
     f = nmea_get_field(sentence, 7, &flen);
-    rmc->course_true = nmea_parse_double(f, flen);
+    rmc->speed_knots = nmea_parse_double(f, flen);
 
     f = nmea_get_field(sentence, 8, &flen);
-    nmea_parse_date(f, flen, &rmc->date_day, &rmc->date_month, &rmc->date_year);
+    rmc->course_true = nmea_parse_double(f, flen);
 
     f = nmea_get_field(sentence, 9, &flen);
-    rmc->mag_variation = nmea_parse_double(f, flen);
+    nmea_parse_date(f, flen, &rmc->date_day, &rmc->date_month, &rmc->date_year);
 
     f = nmea_get_field(sentence, 10, &flen);
-    rmc->mag_var_dir = nmea_parse_char(f, flen);
+    rmc->mag_variation = nmea_parse_double(f, flen);
 
     f = nmea_get_field(sentence, 11, &flen);
+    rmc->mag_var_dir = nmea_parse_char(f, flen);
+
+    f = nmea_get_field(sentence, 12, &flen);
     rmc->mode = nmea_parse_char(f, flen);
 }
 
@@ -286,31 +294,33 @@ static void nmea_parse_gst(nmea_parser_t* parser, const char* sentence)
     nmea_gst_t* gst = &parser->data.gst;
     memset(gst, 0, sizeof(nmea_gst_t));
 
+    /* Field 0 is the sentence type tag (e.g. "GNGST"), data fields start at 1.
+     * GST format: GNGST,time,rms,major,minor,orient,stdLat,stdLon,stdAlt */
     uint8_t flen;
     const char* f;
 
-    f = nmea_get_field(sentence, 0, &flen);
+    f = nmea_get_field(sentence, 1, &flen);
     gst->utc_time = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 1, &flen);
+    f = nmea_get_field(sentence, 2, &flen);
     gst->total_rms = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 2, &flen);
+    f = nmea_get_field(sentence, 3, &flen);
     gst->std_major = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 3, &flen);
+    f = nmea_get_field(sentence, 4, &flen);
     gst->std_minor = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 4, &flen);
+    f = nmea_get_field(sentence, 5, &flen);
     gst->orientation = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 5, &flen);
+    f = nmea_get_field(sentence, 6, &flen);
     gst->std_lat = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 6, &flen);
+    f = nmea_get_field(sentence, 7, &flen);
     gst->std_lon = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 7, &flen);
+    f = nmea_get_field(sentence, 8, &flen);
     gst->std_alt = nmea_parse_double(f, flen);
 }
 
@@ -327,19 +337,21 @@ static void nmea_parse_gsv(nmea_parser_t* parser, const char* sentence)
     uint8_t flen;
     const char* f;
 
-    f = nmea_get_field(sentence, 0, &flen);
+    /* Field 0 is the sentence type tag (e.g. "GNGSV"), data fields start at 1.
+     * GSV format: GNGSV,numMsgs,msgNum,numSats,PRN1,el1,az1,SNR1,... */
+    f = nmea_get_field(sentence, 1, &flen);
     gsv->num_messages = (uint8_t)nmea_parse_int(f, flen);
 
-    f = nmea_get_field(sentence, 1, &flen);
+    f = nmea_get_field(sentence, 2, &flen);
     gsv->message_number = (uint8_t)nmea_parse_int(f, flen);
 
-    f = nmea_get_field(sentence, 2, &flen);
+    f = nmea_get_field(sentence, 3, &flen);
     gsv->num_sats_in_view = (uint8_t)nmea_parse_int(f, flen);
 
     /* Each satellite has 4 fields: PRN, elevation, azimuth, SNR */
     gsv->sat_count = 0;
     for (int i = 0; i < NMEA_GSV_MAX_SATS; i++) {
-        uint8_t base = 3 + i * 4;
+        uint8_t base = 4 + i * 4;
 
         f = nmea_get_field(sentence, base, &flen);
         if (f == NULL || flen == 0) break;
@@ -360,7 +372,7 @@ static void nmea_parse_gsv(nmea_parser_t* parser, const char* sentence)
     }
 
     /* Optional: system ID (NMEA 4.10+) */
-    f = nmea_get_field(sentence, 3 + NMEA_GSV_MAX_SATS * 4, &flen);
+    f = nmea_get_field(sentence, 4 + NMEA_GSV_MAX_SATS * 4, &flen);
     if (f != NULL && flen > 0) {
         gsv->system_id = (uint8_t)nmea_parse_int(f, flen);
     }
@@ -374,29 +386,31 @@ static void nmea_parse_gsa(nmea_parser_t* parser, const char* sentence)
     uint8_t flen;
     const char* f;
 
-    f = nmea_get_field(sentence, 0, &flen);
+    /* Field 0 is the sentence type tag (e.g. "GNGSA"), data fields start at 1.
+     * GSA format: GNGSA,mode,fix,PRN1..12,PDOP,HDOP,VDOP[,sysId] */
+    f = nmea_get_field(sentence, 1, &flen);
     gsa->mode = nmea_parse_char(f, flen);
 
-    f = nmea_get_field(sentence, 1, &flen);
+    f = nmea_get_field(sentence, 2, &flen);
     gsa->fix = (uint8_t)nmea_parse_int(f, flen);
 
-    /* PRNs: fields 2 through 13 (12 satellites) */
+    /* PRNs: fields 3 through 14 (12 satellites) */
     for (int i = 0; i < NMEA_GSA_MAX_SATS; i++) {
-        f = nmea_get_field(sentence, 2 + i, &flen);
+        f = nmea_get_field(sentence, 3 + i, &flen);
         gsa->prn[i] = nmea_parse_int(f, flen);
     }
 
-    f = nmea_get_field(sentence, 14, &flen);
+    f = nmea_get_field(sentence, 15, &flen);
     gsa->pdop = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 15, &flen);
+    f = nmea_get_field(sentence, 16, &flen);
     gsa->hdop = nmea_parse_double(f, flen);
 
-    f = nmea_get_field(sentence, 16, &flen);
+    f = nmea_get_field(sentence, 17, &flen);
     gsa->vdop = nmea_parse_double(f, flen);
 
     /* Optional: system ID (NMEA 4.10+) */
-    f = nmea_get_field(sentence, 17, &flen);
+    f = nmea_get_field(sentence, 18, &flen);
     if (f != NULL && flen > 0) {
         gsa->system_id = (uint8_t)nmea_parse_int(f, flen);
     }

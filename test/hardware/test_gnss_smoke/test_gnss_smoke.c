@@ -34,8 +34,8 @@ void test_hw_gga_rmc_valid_snapshot(void)
 {
     gnss_um980_set_rx_source(&primary, &rx_buffer);
 
-    const char* gga = "$GNGGA,092751.000,5321.6802,N,01339.4463,E,1,09,1.2,34.5,M,0.0,M,,*7A\r\n";
-    const char* rmc = "$GNRMC,092751.000,A,5321.6802,N,01339.4463,E,5.4,45.0,250125,,,A*4E\r\n";
+    const char* gga = "$GNGGA,092751.000,5321.6802,N,01339.4463,E,1,09,1.2,34.5,M,0.0,M,,*46\r\n";
+    const char* rmc = "$GNRMC,092751.000,A,5321.6802,N,01339.4463,E,5.4,45.0,250125,,,A*4D\r\n";
     byte_ring_buffer_write(&rx_buffer, (const uint8_t*)gga, strlen(gga));
     byte_ring_buffer_write(&rx_buffer, (const uint8_t*)rmc, strlen(rmc));
 
@@ -70,8 +70,8 @@ void test_hw_rmc_void_motion_invalid(void)
 {
     gnss_um980_set_rx_source(&primary, &rx_buffer);
 
-    const char* gga = "$GNGGA,092751.000,5321.6802,N,01339.4463,E,1,09,1.2,34.5,M,0.0,M,,*7A\r\n";
-    const char* rmc = "$GNRMC,092751.000,V,,,,,,250125,,N*79\r\n";
+    const char* gga = "$GNGGA,092751.000,5321.6802,N,01339.4463,E,1,09,1.2,34.5,M,0.0,M,,*46\r\n";
+    const char* rmc = "$GNRMC,092751.000,V,,,,,,250125,,N*5A\r\n";
     byte_ring_buffer_write(&rx_buffer, (const uint8_t*)gga, strlen(gga));
     byte_ring_buffer_write(&rx_buffer, (const uint8_t*)rmc, strlen(rmc));
 
@@ -93,9 +93,9 @@ void test_hw_dual_isolation(void)
     gnss_um980_set_rx_source(&primary, &rx_buffer);
     gnss_um980_set_rx_source(&secondary, &rx2_buffer);
 
-    const char* gga1 = "$GNGGA,100000,4807.038,N,01131.000,E,4,12,1.0,100.0,M,0.0,M,,*4A\r\n";
-    const char* rmc1 = "$GNRMC,100000,A,4807.038,N,01131.000,E,22.4,84.4,230394,003.1,W,A*2E\r\n";
-    const char* gga2 = "$GNGGA,200000,3412.500,S,11815.000,W,1,06,2.0,50.0,M,0.0,M,,*55\r\n";
+    const char* gga1 = "$GNGGA,100000,4807.038,N,01131.000,E,4,12,1.0,100.0,M,0.0,M,,*69\r\n";
+    const char* rmc1 = "$GNRMC,100000,A,4807.038,N,01131.000,E,22.4,84.4,230394,003.1,W,A*15\r\n";
+    const char* gga2 = "$GNGGA,200000,3412.500,S,11815.000,W,1,06,2.0,50.0,M,0.0,M,,*5D\r\n";
     const char* rmc2 = "$GNRMC,200000,V,,,,,,010125,,N*48\r\n";
 
     byte_ring_buffer_write(&rx_buffer, (const uint8_t*)gga1, strlen(gga1));
@@ -117,7 +117,7 @@ void test_hw_correction_age(void)
     gnss_um980_set_rx_source(&primary, &rx_buffer);
 
     /* GGA with age_diff=46.9 (field present) */
-    const char* gga = "$GNGGA,092751.000,5321.6802,N,01339.4463,E,1,09,1.2,34.5,M,46.9,M,,*57\r\n";
+    const char* gga = "$GNGGA,092751.000,5321.6802,N,01339.4463,E,1,09,1.2,34.5,M,,M,46.9,,*51\r\n";
     byte_ring_buffer_write(&rx_buffer, (const uint8_t*)gga, strlen(gga));
 
     gnss_um980_service_step((runtime_component_t*)&primary, 92751000);

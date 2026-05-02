@@ -1,0 +1,41 @@
+name: Native Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  native-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Run native tests
+        run: pio test -e native --no-reset
+
+  esp32-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build ESP32 NAV
+        run: pio run -e nav_esp32_t_eth_lite
+
+      - name: Build ESP32 Steering
+        run: pio run -e steer_esp32s3_t_eth_lite

@@ -247,7 +247,7 @@ static bool find_pgn_in_tx(uint16_t target_pgn, uint8_t* out_frame,
             if (tmp[i] == 0x80 && tmp[i+1] == 0x81) {
                 uint16_t pgn = (uint16_t)tmp[i+3] | ((uint16_t)tmp[i+4] << 8);
                 uint8_t len = tmp[i+5];
-                size_t flen = 8 + len;
+                size_t flen = 7 + len;
                 if (pgn == target_pgn && flen <= sizeof(tmp)) {
                     if (out_frame != NULL) {
                         memcpy(out_frame, &tmp[i], flen);
@@ -908,6 +908,13 @@ void test_fix_quality_all_nmea_values(void)
     for (int i = 0; i < 6; i++) {
         set_valid_gnss_snapshot();
         set_valid_heading_snapshot(0.0);
+
+        /* For GNSS_FIX_NONE, the snapshot must be invalid to trigger GNSS_INVALID */
+        if (cases[i].gnss_fq == GNSS_FIX_NONE) {
+            s_gnss_storage.valid = false;
+            s_gnss_storage.fresh = false;
+        }
+
         s_gnss_storage.fix_quality = cases[i].gnss_fq;
         snapshot_buffer_set(&s_gnss_snap, &s_gnss_storage);
 
@@ -1319,7 +1326,7 @@ void test_crc_exact_on_tx_frames(void)
         for (size_t i = 0; i + 8 <= n; ) {
             if (tmp[i] == 0x80 && tmp[i+1] == 0x81) {
                 uint8_t len = tmp[i+5];
-                size_t flen = 8 + len;
+                size_t flen = 7 + len;
                 TEST_ASSERT_TRUE(aog_frame_verify_crc(&tmp[i], flen));
                 frames_checked++;
                 i += flen;
@@ -1544,7 +1551,7 @@ void test_golden_crc_discovery_frame(void)
     uint8_t frame[AOG_MAX_FRAME_SIZE];
     size_t flen = aog_frame_encode(frame, AOG_SRC_AOG, AOG_PGN_SCAN_REQUEST, NULL, 0);
 
-    TEST_ASSERT_EQUAL(8, flen); /* 7 header + 0 payload + 1 CRC */
+    TEST_ASSERT_EQUAL(7, flen); /* preamble(2)+src(1)+pgn(2)+len(1)+crc(1) = 7 */
     TEST_ASSERT_EQUAL_UINT8(0x80, frame[0]);
     TEST_ASSERT_EQUAL_UINT8(0x81, frame[1]);
     TEST_ASSERT_EQUAL_UINT8(AOG_SRC_AOG, frame[2]);
@@ -1555,7 +1562,7 @@ void test_golden_crc_discovery_frame(void)
 
     /* CRC = (SRC + PGN_lo + PGN_hi + LEN) mod 256 */
     uint8_t expected_crc = (0x00 + 0xCA + 0x00 + 0x00) & 0xFF;
-    TEST_ASSERT_EQUAL_UINT8(expected_crc, frame[7]);
+    TEST_ASSERT_EQUAL_UINT8(expected_crc, frame[6]); /* CRC at byte 6 for 0-data frame */
     TEST_ASSERT_TRUE(aog_frame_verify_crc(frame, flen));
 }
 
@@ -1589,7 +1596,7 @@ void test_golden_hello_response_frame(void)
     uint8_t frame[AOG_MAX_FRAME_SIZE];
     size_t flen = aog_frame_encode(frame, AOG_SRC_GPS, AOG_PGN_HELLO_RESPONSE,
                                      payload, AOG_HELLO_DATA_SIZE);
-    TEST_ASSERT_EQUAL(15, flen); /* 7 + 7 + 1 */
+    TEST_ASSERT_EQUAL(14, flen); /* preamble(2)+src(1)+pgn(2)+len(1)+data(7)+crc(1) = 14 */
     TEST_ASSERT_EQUAL_UINT8(0x80, frame[0]);
     TEST_ASSERT_EQUAL_UINT8(0x81, frame[1]);
     TEST_ASSERT_EQUAL_UINT8(0x05, frame[2]);
@@ -1637,7 +1644,7 @@ void test_golden_scan_reply_frame(void)
     uint8_t frame[AOG_MAX_FRAME_SIZE];
     size_t flen = aog_frame_encode(frame, AOG_SRC_GPS, AOG_PGN_SCAN_REPLY,
                                      payload, plen);
-    TEST_ASSERT_EQUAL(16, flen); /* 7 + 8 + 1 */
+    TEST_ASSERT_EQUAL(15, flen); /* preamble(2)+src(1)+pgn(2)+len(1)+data(8)+crc(1) = 15 */
     TEST_ASSERT_EQUAL_UINT8(0x80, frame[0]);
     TEST_ASSERT_EQUAL_UINT8(0x81, frame[1]);
     TEST_ASSERT_EQUAL_UINT8(0x05, frame[2]);
@@ -1667,10 +1674,10 @@ void test_golden_heading_encoding(void)
     aog_pgn_encode_pgn214(payload, &data);
 
     /* heading_dual at offset 16-19 */
-    /* IEEE 754: 180.0f = 0x43480000 → LE: 0x00, 0x00, 0x48, 0x43 */
+    /* IEEE 754: 180.0f = 0x43340000 → LE: 0x00, 0x00, 0x34, 0x43 */
     TEST_ASSERT_EQUAL_UINT8(0x00, payload[16]);
     TEST_ASSERT_EQUAL_UINT8(0x00, payload[17]);
-    TEST_ASSERT_EQUAL_UINT8(0x48, payload[18]);
+    TEST_ASSERT_EQUAL_UINT8(0x34, payload[18]);
     TEST_ASSERT_EQUAL_UINT8(0x43, payload[19]);
 
     /* heading_dual = 90.0f → 0x42B40000 → LE: 0x00, 0x00, 0xB4, 0x42 */

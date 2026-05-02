@@ -1,0 +1,8 @@
+{
+  "name": "aog_navigation_app",
+  "version": "1.0.0",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "."
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "version": "R2-WP-B",
+  "timestamp": "2026-05-02T11:47:39",
+  "project_dir": "/home/z/nav-fix-001-r2-work",
+  "results": [
+    {
+      "name": "Policy grep/rg checks",
+      "category": "Static Analysis",
+      "status": "PASS",
+      "command": "rg policy checks (6 items)",
+      "duration_s": 0,
+      "exit_code": 0,
+      "details": "Arduino.h: 0 hit(s) <= 0 OK\nSerial.: 0 hit(s) <= 0 OK\nWiFiUDP/EthernetUDP: 0 hit(s) <= 2 OK\nSPI./Wire.: 2 hit(s) <= 2 OK\n20Hz/50ms: 3 hit(s) <= 5 OK\nservice_step: 0 hit(s) <= 0 OK"
+    },
+    {
+      "name": "cppcheck",
+      "category": "Static Analysis",
+      "status": "PASS",
+      "command": "cppcheck",
+      "duration_s": 0.71,
+      "exit_code": 0,
+      "details": "0 warnings, 0 errors on components/"
+    },
+    {
+      "name": "clang-format",
+      "category": "Static Analysis",
+      "status": "PASS",
+      "command": "clang-format --dry-run /home/z/nav-fix-001-r2-work/components/runtime_buffers/byte_ring_buffer.c",
+      "duration_s": 0.12,
+      "exit_code": 0,
+      "details": "clang-format available \u2014 dry-run OK"
+    },
+    {
+      "name": "pio test build-only",
+      "category": "Native Build",
+      "status": "BUILD_ONLY_PASS",
+      "command": "pio test -e native --without-testing",
+      "duration_s": 23.1,
+      "exit_code": 0,
+      "details": "15/23 suites PASSED, 8 ERRORED (expected: lib_ignore'd steering tests)"
+    },
+    {
+      "name": "host/test_byte_ring_buffer",
+      "category": "Native Test",
+      "status": "PASS",
+      "command": "pio test -f host/test_byte_ring_buffer",
+      "duration_s": 1.86,
+      "exit_code": 0,
+      "details": "20/20 tests PASSED"
+    },
+    {
+      "name": "host/test_rtcm_router",
+      "category": "Native Test",
+      "status": "PASS",
+      "command": "pio test -f host/test_rtcm_router",
+      "duration_s": 1.91,
+      "exit_code": 0,
+      "details": "22/22 tests PASSED"
+    },
+    {
+      "name": "host/test_runtime_mode",
+      "category": "Native Test",
+      "status": "PASS",
+      "command": "pio test -f host/test_runtime_mode",
+      "duration_s": 1.85,
+      "exit_code": 0,
+      "details": "15/15 tests PASSED"
+    },
+    {
+      "name": "ESP32 NAV build",
+      "category": "ESP32 Build",
+      "status": "PASS",
+      "command": "pio run -e nav_esp32_t_eth_lite",
+      "duration_s": 4.64,
+      "exit_code": 0,
+      "details": "Build succeeded \u2014 no compiler errors, no steering files compiled"
+    },
+    {
+      "name": "Steering exclusion (objects)",
+      "category": "Build Integrity",
+      "status": "PASS",
+      "command": "find build dir for steering .o files",
+      "duration_s": 0,
+      "exit_code": 0,
+      "details": "No steering .o files in NAV build directory"
+    }
+  ],
+  "summary": {
+    "PASS": 8,
+    "BUILD_ONLY_PASS": 1
+  }
+}

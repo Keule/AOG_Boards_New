@@ -505,8 +505,8 @@ void test_freshness_motion_stale(void)
         "GNGGA,123520,4807.040,N,01131.001,E,1,08,1.0,50.1,M,0.0,M,,");
     gnss_um980_finalize_snapshot(&primary, 7000);
     /* Now GGA at 7000ms, RMC at 5000ms */
-    /* Check at 7000 + 2500ms: GGA fresh (2500ms), RMC stale (4500ms > 2000ms) */
-    gnss_snapshot_check_freshness(&primary.snapshot, 9500, GNSS_FRESHNESS_TIMEOUT_MS_DEFAULT);
+    /* Check at 8500ms: GGA fresh (1500ms < 2000ms), RMC stale (3500ms > 2000ms) */
+    gnss_snapshot_check_freshness(&primary.snapshot, 8500, GNSS_FRESHNESS_TIMEOUT_MS_DEFAULT);
     TEST_ASSERT_TRUE(primary.snapshot.position_valid);   /* GGA fresh */
     TEST_ASSERT_FALSE(primary.snapshot.motion_valid);    /* RMC stale */
     TEST_ASSERT_FALSE(primary.snapshot.valid);
@@ -564,7 +564,7 @@ void test_custom_freshness_timeout(void)
 void test_correction_age_present(void)
 {
     feed_sentence(&primary,
-        "GNGGA,123519,4807.038,N,01131.000,E,1,08,1.0,50.0,M,46.9,M,,");
+        "GNGGA,123519,4807.038,N,01131.000,E,1,08,1.0,50.0,M,,M,46.9,,");
     gnss_um980_finalize_snapshot(&primary, 5000);
 
     TEST_ASSERT_TRUE(primary.gga.age_diff_valid);
@@ -998,7 +998,7 @@ void test_invalid_checksum_preserves_snapshot(void)
     TEST_ASSERT_EQUAL(orig_sats, snap2->satellites);
     TEST_ASSERT_TRUE(snap2->valid);
     TEST_ASSERT_EQUAL(5, primary.checksum_errors);
-    TEST_ASSERT_EQUAL(0, primary.sentences_parsed);  /* still only 2 from before */
+    TEST_ASSERT_EQUAL(2, primary.sentences_parsed);  /* still only 2 from before */
 
     /* Verify the bad data is NOT in the snapshot */
     TEST_ASSERT_TRUE(fabs(snap2->latitude - 53.361) > 0.01);

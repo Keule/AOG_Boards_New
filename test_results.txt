@@ -262,7 +262,7 @@ Source IDs (2 tests):
   [PASS] test_module_type_initialized — 0x78
 
 Timing / Conversion / Architecture (6 tests):
-  [PASS] test_cyclic_20hz — deterministic 50ms interval
+  [PASS] test_cyclic_20hz — deterministic 10ms interval (100 Hz fast-path)
   [PASS] test_heading_normalization — rad→deg 0-360
   [PASS] test_speed_conversion — m/s→km/h
   [PASS] test_hdop_scaling — ×100

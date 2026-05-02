@@ -1,0 +1,8 @@
+{
+  "name": "transport_eth",
+  "version": "1.0.0",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "."
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "steering_control",
+  "version": "1.0.0",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "."
+  }
+}

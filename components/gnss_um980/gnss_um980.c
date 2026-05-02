@@ -248,8 +248,11 @@ void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         return;
     }
 
-    /* Consume bytes from RX source buffer */
-    uint8_t tmp[64];
+    /* Consume bytes from RX source buffer
+       tmp must be large enough for multiple NMEA sentences (max ~82 bytes each).
+       In production, service_step is called repeatedly in a task loop, but tests
+       may batch multiple sentences before calling service_step once. */
+    uint8_t tmp[256];
     size_t available = byte_ring_buffer_available(rx->rx_source);
 
     if (available > 0) {

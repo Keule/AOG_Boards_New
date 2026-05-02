@@ -567,15 +567,17 @@ void test_retry_resets_request_offset(void)
     TEST_ASSERT_EQUAL(NTRIP_STATE_RETRY_WAIT, ntrip_client_get_state(&client));
     TEST_ASSERT_EQUAL(1, ntrip_client_get_reconnect_count(&client));
 
-    /* After backoff, advance to CONNECTING */
+    /* After backoff, stub transport connects immediately so the state
+     * chains through CONNECTING → BUILD_REQUEST → SEND_REQUEST → WAIT_RESPONSE */
     uint64_t backoff_us = (uint64_t)client.config.reconnect_backoff_ms * 1000u;
     ntrip_client_service_step((runtime_component_t*)&client,
                               2000 + backoff_us + 1000);
-    TEST_ASSERT_EQUAL(NTRIP_STATE_CONNECTING, ntrip_client_get_state(&client));
+    TEST_ASSERT_EQUAL(NTRIP_STATE_WAIT_RESPONSE, ntrip_client_get_state(&client));
 
-    /* request offset should be reset */
-    TEST_ASSERT_EQUAL(0, client.request_sent_offset);
-    TEST_ASSERT_EQUAL(0, client.request_len);
+    /* Request was rebuilt from scratch and fully sent during retry */
+    TEST_ASSERT_TRUE(client.request_len > 0);
+    TEST_ASSERT_EQUAL(client.request_len, client.request_sent_offset);
+    /* Response state was reset (no new response yet) */
     TEST_ASSERT_EQUAL(0, client.response_received);
     TEST_ASSERT_EQUAL(0, client.http_status_code);
 }

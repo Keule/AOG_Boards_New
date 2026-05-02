@@ -51,7 +51,8 @@ size_t aog_frame_encode(uint8_t* buffer, uint8_t src, uint16_t pgn,
 
 bool aog_frame_verify_crc(const uint8_t* frame, size_t frame_length)
 {
-    if (frame_length < 8) {
+    /* Minimum frame: preamble(2) + src(1) + pgn(2) + len(1) + crc(1) = 7 */
+    if (frame_length < 7) {
         return false;
     }
 
@@ -91,7 +92,8 @@ bool aog_frame_verify_crc(const uint8_t* frame, size_t frame_length)
 bool aog_frame_verify_crc_tolerant(const uint8_t* frame, size_t frame_length)
 {
     /* Check basic frame integrity first */
-    if (frame_length < 8) {
+    /* Minimum frame: preamble(2) + src(1) + pgn(2) + len(1) + crc(1) = 7 */
+    if (frame_length < 7) {
         return false;
     }
 
