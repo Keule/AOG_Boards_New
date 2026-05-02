@@ -140,12 +140,17 @@ bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins
 
     case BOARD_UART_GNSS_PRIMARY:
 #if defined(CONFIG_BOARD_ESP32)
-        /* UART_NUM_1: RX=GPIO16 (UM980 #1 NMEA TX → ESP32 RX)
-         *            TX=GPIO14 (ESP32 TX → UM980 #1 RTCM RXIN)
-         * GPIO14 is not used by RMII Ethernet on LilyGO T-ETH Lite ESP32.
-         * Wiring: ESP32 GPIO14 ↔ UM980 #1 RXIN pin. */
-        pins->tx_pin = 14;
-        pins->rx_pin = 16;
+        /* LilyGO T-ETH-Lite ESP32 (classic) — NAV pin matrix
+         * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h
+         *
+         * UART_NUM_1: TX=GPIO2  (ESP32 TX → UM980 #1 RTCM RXIN)
+         *            RX=GPIO4  (UM980 #1 NMEA TX → ESP32 RX)
+         *
+         * GPIO2 is output-capable (not input-only). OK for TX.
+         * GPIO4 is output-capable, used here as RX (input). OK.
+         * Both are NOT in the RMII reserved range. */
+        pins->tx_pin = BOARD_GNSS_UART1_TX_PIN;  /* 2 */
+        pins->rx_pin = BOARD_GNSS_UART1_RX_PIN;  /* 4 */
 #elif defined(CONFIG_BOARD_ESP32S3)
         /* UART_NUM_1: RX=GPIO4 (UM980 #1 NMEA TX → ESP32-S3 RX)
          *            TX=GPIO6 (ESP32-S3 TX → UM980 #1 RTCM RXIN)
@@ -158,12 +163,17 @@ bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins
 
     case BOARD_UART_GNSS_SECONDARY:
 #if defined(CONFIG_BOARD_ESP32)
-        /* UART_NUM_2: RX=GPIO17 (UM980 #2 NMEA TX → ESP32 RX)
-         *            TX=GPIO15 (ESP32 TX → UM980 #2 RTCM RXIN)
-         * GPIO15 is not used by RMII Ethernet on LilyGO T-ETH Lite ESP32.
-         * Wiring: ESP32 GPIO15 ↔ UM980 #2 RXIN pin. */
-        pins->tx_pin = 15;
-        pins->rx_pin = 17;
+        /* LilyGO T-ETH-Lite ESP32 (classic) — NAV pin matrix
+         * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h
+         *
+         * UART_NUM_2: TX=GPIO33 (ESP32 TX → UM980 #2 RTCM RXIN)
+         *            RX=GPIO35 (UM980 #2 NMEA TX → ESP32 RX)
+         *
+         * GPIO33 is output-capable (NOT in input-only range 34..39). OK for TX.
+         * GPIO35 is input-only (in range 34..39). OK for RX (input only needed).
+         * Sanity: GPIO35 is NOT used as TX — hard rule satisfied. */
+        pins->tx_pin = BOARD_GNSS_UART2_TX_PIN;  /* 33 */
+        pins->rx_pin = BOARD_GNSS_UART2_RX_PIN;  /* 35 */
 #elif defined(CONFIG_BOARD_ESP32S3)
         /* UART_NUM_2: RX=GPIO5 (UM980 #2 NMEA TX → ESP32-S3 RX)
          *            TX=GPIO7 (ESP32-S3 TX → UM980 #2 RTCM RXIN)
@@ -189,4 +199,75 @@ bool board_profile_has_uart_tx(board_uart_port_t port)
         return false;
     }
     return pins.tx_pin != BOARD_PIN_UNASSIGNED;
+}
+
+bool board_profile_get_eth_pins(board_eth_pins_t* pins)
+{
+    if (pins == NULL) {
+        return false;
+    }
+
+#if defined(CONFIG_BOARD_ESP32) && defined(CONFIG_ETH_MAC_RMII)
+    /* LilyGO T-ETH-Lite ESP32 — RTL8201 RMII
+     * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h */
+    pins->phy_type   = BOARD_ETH_PHY_TYPE;
+    pins->phy_addr   = BOARD_ETH_PHY_ADDR;
+    pins->clk_mode   = BOARD_ETH_CLK_MODE;
+    pins->reset_pin  = BOARD_ETH_RESET_PIN;
+    pins->mdc_pin    = BOARD_ETH_MDC_PIN;
+    pins->mdio_pin   = BOARD_ETH_MDIO_PIN;
+    pins->power_pin  = BOARD_ETH_POWER_PIN;
+    return true;
+#else
+    pins->phy_type   = -1;
+    pins->phy_addr   = -1;
+    pins->clk_mode   = -1;
+    pins->reset_pin  = -1;
+    pins->mdc_pin    = -1;
+    pins->mdio_pin   = -1;
+    pins->power_pin  = -1;
+    return false;
+#endif
+}
+
+bool board_profile_get_sd_pins(board_sd_pins_t* pins)
+{
+    if (pins == NULL) {
+        return false;
+    }
+
+#if defined(CONFIG_BOARD_ESP32)
+    /* LilyGO T-ETH-Lite ESP32 — SD Card (SPI mode)
+     * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h */
+    pins->miso_pin = BOARD_SD_MISO_PIN;
+    pins->mosi_pin = BOARD_SD_MOSI_PIN;
+    pins->sclk_pin = BOARD_SD_SCLK_PIN;
+    pins->cs_pin   = BOARD_SD_CS_PIN;
+    return true;
+#else
+    pins->miso_pin = -1;
+    pins->mosi_pin = -1;
+    pins->sclk_pin = -1;
+    pins->cs_pin   = -1;
+    return false;
+#endif
+}
+
+bool board_profile_get_misc_pins(board_misc_pins_t* pins)
+{
+    if (pins == NULL) {
+        return false;
+    }
+
+#if defined(CONFIG_BOARD_ESP32)
+    /* LilyGO T-ETH-Lite ESP32 — Safety input + Log switch
+     * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h */
+    pins->safety_in_pin  = BOARD_SAFETY_IN_PIN;
+    pins->log_switch_pin = BOARD_LOG_SWITCH_PIN;
+    return true;
+#else
+    pins->safety_in_pin  = -1;
+    pins->log_switch_pin = -1;
+    return false;
+#endif
 }

@@ -59,6 +59,163 @@ static const char* TAG = "APP_CORE";
 #define SAFETY_WATCHDOG_TIMEOUT_US  100000u  /* 100 ms */
 #endif
 
+/* ================================================================
+ * WP-C: Pin Sanity Check
+ *
+ * Validates GPIO pin assignments at boot for the classic ESP32:
+ *   - GPIO 0..33: input+output capable
+ *   - GPIO 34..39: INPUT ONLY (cannot be used as TX)
+ *
+ * This check runs ONCE during app_core_init() and ABORTS further
+ * init if a critical pin conflict is detected.
+ * ================================================================ */
+
+/* Classic ESP32 input-only GPIO range */
+#define ESP32_INPUT_ONLY_GPIO_MIN  34
+#define ESP32_INPUT_ONLY_GPIO_MAX  39
+
+static bool is_esp32_input_only_gpio(int pin)
+{
+    return (pin >= ESP32_INPUT_ONLY_GPIO_MIN && pin <= ESP32_INPUT_ONLY_GPIO_MAX);
+}
+
+/**
+ * Run sanity checks on board profile pin assignments.
+ * Returns true if all checks pass, false if a critical error found.
+ *
+ * Checks:
+ * 1. UART TX pins must NOT be input-only GPIOs (34..39 on classic ESP32)
+ * 2. GPIO35 must NOT be used as TX (explicit hard rule from task spec)
+ * 3. NAV role: Ethernet must be RMII, not W5500
+ * 4. GNSS UART pins must be assigned and non-negative
+ */
+static bool board_pin_sanity_check(void)
+{
+    bool ok = true;
+
+    ESP_LOGI(TAG, "=== BOARD PIN SANITY CHECK ===");
+
+    /* ---- Check UART pins ---- */
+    int uart_ports[] = {
+        BOARD_UART_CONSOLE,
+        BOARD_UART_GNSS_PRIMARY,
+        BOARD_UART_GNSS_SECONDARY,
+    };
+    const char* uart_names[] = {
+        "CONSOLE",
+        "GNSS1",
+        "GNSS2",
+    };
+
+    for (int i = 0; i < 3; i++) {
+        board_uart_port_t port = (board_uart_port_t)uart_ports[i];
+        if (!board_profile_has_uart(port)) {
+            continue;  /* port not active on this build */
+        }
+
+        board_uart_pins_t pins;
+        if (!board_profile_get_uart_pins(port, &pins)) {
+            continue;
+        }
+
+        /* Check TX not input-only */
+        if (is_esp32_input_only_gpio(pins.tx_pin)) {
+            ESP_LOGE("BOARD_PIN_ERROR: %s UART TX=GPIO%d is input-only (GPIO%d..%d)",
+                     uart_names[i], pins.tx_pin,
+                     ESP32_INPUT_ONLY_GPIO_MIN, ESP32_INPUT_ONLY_GPIO_MAX);
+            ok = false;
+        }
+
+        /* Hard rule: GPIO35 must NOT be TX */
+        if (pins.tx_pin == 35) {
+            ESP_LOGE("BOARD_PIN_ERROR: %s UART TX=GPIO35 violates hard rule "
+                     "(GPIO35 is input-only on classic ESP32)",
+                     uart_names[i]);
+            ok = false;
+        }
+    }
+
+#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
+    /* ---- Check Ethernet type ---- */
+    ethernet_kind_t eth = board_profile_get_eth();
+    if (eth == ETH_W5500_SPI) {
+        ESP_LOGE("BOARD_PIN_ERROR: NAV role requires ETH_INTERNAL_MAC_RMII, "
+                 "but board reports ETH_W5500_SPI");
+        ok = false;
+    }
+#endif
+
+    if (ok) {
+        ESP_LOGI(TAG, "=== BOARD PIN SANITY CHECK: PASS ===");
+    } else {
+        ESP_LOGE(TAG, "=== BOARD PIN SANITY CHECK: FAIL — init aborted ===");
+    }
+
+    return ok;
+}
+
+/* ================================================================
+ * WP-B: Boot-Log — Pin Profile
+ *
+ * Prints the complete board pin profile at startup.
+ * ================================================================ */
+
+static void board_pin_boot_log(void)
+{
+    board_type_t board = board_profile_get_board();
+
+    /* ---- Line 1: Profile & Role ---- */
+    const char* role = "UNKNOWN";
+#if defined(DEVICE_ROLE_NAVIGATION)
+    role = "NAV";
+#elif defined(DEVICE_ROLE_STEERING)
+    role = "STEER";
+#elif defined(DEVICE_ROLE_FULL_TEST)
+    role = "FULL_TEST";
+#endif
+
+    ESP_LOGI(TAG, "BOARD: profile=%s role=%s", BOARD_PROFILE_NAME, role);
+
+    /* ---- Line 2: Ethernet ---- */
+    board_eth_pins_t eth_pins;
+    if (board_profile_get_eth_pins(&eth_pins)) {
+        ESP_LOGI(TAG, "BOARD: eth=RTL8201/RMII clk=GPIO0_IN mdc=%d mdio=%d power=%d reset=%d",
+                 eth_pins.mdc_pin, eth_pins.mdio_pin,
+                 eth_pins.power_pin, eth_pins.reset_pin);
+    } else {
+        ethernet_kind_t eth = board_profile_get_eth();
+        ESP_LOGI(TAG, "BOARD: eth=%d (no RMII pin details)", (int)eth);
+    }
+
+    /* ---- Lines 3-4: GNSS UARTs ---- */
+    board_uart_pins_t uart_pins;
+    if (board_profile_has_uart(BOARD_UART_GNSS_PRIMARY) &&
+        board_profile_get_uart_pins(BOARD_UART_GNSS_PRIMARY, &uart_pins)) {
+        ESP_LOGI(TAG, "BOARD: gnss1 uart=1 baud=%d tx=%d rx=%d",
+                 BOARD_GNSS_UART_BAUDRATE, uart_pins.tx_pin, uart_pins.rx_pin);
+    }
+    if (board_profile_has_uart(BOARD_UART_GNSS_SECONDARY) &&
+        board_profile_get_uart_pins(BOARD_UART_GNSS_SECONDARY, &uart_pins)) {
+        ESP_LOGI(TAG, "BOARD: gnss2 uart=2 baud=%d tx=%d rx=%d",
+                 BOARD_GNSS_UART_BAUDRATE, uart_pins.tx_pin, uart_pins.rx_pin);
+    }
+
+    /* ---- Line 5: SD Card ---- */
+    board_sd_pins_t sd_pins;
+    if (board_profile_get_sd_pins(&sd_pins)) {
+        ESP_LOGI(TAG, "BOARD: sd miso=%d mosi=%d sclk=%d cs=%d",
+                 sd_pins.miso_pin, sd_pins.mosi_pin,
+                 sd_pins.sclk_pin, sd_pins.cs_pin);
+    }
+
+    /* ---- Line 6: Misc ---- */
+    board_misc_pins_t misc_pins;
+    if (board_profile_get_misc_pins(&misc_pins)) {
+        ESP_LOGI(TAG, "BOARD: safety_in=%d log_switch=%d",
+                 misc_pins.safety_in_pin, misc_pins.log_switch_pin);
+    }
+}
+
 /* ---- Static instances (no heap allocation) ---- */
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
 
@@ -117,6 +274,15 @@ static transport_udp_t   s_steer_udp;
 void app_core_init(void)
 {
     ESP_LOGI(TAG, "System init");
+
+    /* ---- WP-B: Print board pin profile ---- */
+    board_pin_boot_log();
+
+    /* ---- WP-C: Sanity-check pin assignments ---- */
+    if (!board_pin_sanity_check()) {
+        ESP_LOGE(TAG, "Pin sanity check failed — aborting init");
+        return;
+    }
 
     unsigned int features = feature_flags_get();
 

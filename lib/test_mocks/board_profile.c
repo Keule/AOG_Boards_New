@@ -7,7 +7,14 @@
  * and overrides the real board_profile.c.
  *
  * Mock board: LilyGO T-ETH Lite ESP32 with GNSS UART TX pins assigned
- * (matching the productive board_profile.c for NAV-RTCM-001). */
+ * (matching the productive board_profile.c for NAV-BOARD-PINS-001).
+ *
+ * Pin matrix matches Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h:
+ *   GNSS1: TX=GPIO2, RX=GPIO4
+ *   GNSS2: TX=GPIO33, RX=GPIO35
+ *   ETH:   RTL8201/RMII, MDC=23, MDIO=18, POWER=12
+ *   SD:    MISO=34, MOSI=13, SCLK=14, CS=5
+ *   MISC:  SAFETY_IN=15, LOG_SWITCH=0 */
 #include <stddef.h>
 #include "board_profile.h"
 
@@ -56,14 +63,16 @@ bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins
         pins->rx_pin = 3;
         return true;
     case BOARD_UART_GNSS_PRIMARY:
-        /* Matching productive board: UART_NUM_1 TX=GPIO14, RX=GPIO16 */
-        pins->tx_pin = 14;
-        pins->rx_pin = 16;
+        /* Matching productive board: UART_NUM_1 TX=GPIO2, RX=GPIO4
+         * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h */
+        pins->tx_pin = BOARD_GNSS_UART1_TX_PIN;  /* 2 */
+        pins->rx_pin = BOARD_GNSS_UART1_RX_PIN;  /* 4 */
         return true;
     case BOARD_UART_GNSS_SECONDARY:
-        /* Matching productive board: UART_NUM_2 TX=GPIO15, RX=GPIO17 */
-        pins->tx_pin = 15;
-        pins->rx_pin = 17;
+        /* Matching productive board: UART_NUM_2 TX=GPIO33, RX=GPIO35
+         * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h */
+        pins->tx_pin = BOARD_GNSS_UART2_TX_PIN;  /* 33 */
+        pins->rx_pin = BOARD_GNSS_UART2_RX_PIN;  /* 35 */
         return true;
     default:
         pins->tx_pin = -1;
@@ -82,6 +91,46 @@ bool board_profile_has_uart_tx(board_uart_port_t port)
         return false;
     }
     return pins.tx_pin != BOARD_PIN_UNASSIGNED;
+}
+
+bool board_profile_get_eth_pins(board_eth_pins_t* pins)
+{
+    if (pins == NULL) {
+        return false;
+    }
+    /* Mock matches productive ESP32 NAV: RTL8201 RMII */
+    pins->phy_type   = BOARD_ETH_PHY_TYPE;
+    pins->phy_addr   = BOARD_ETH_PHY_ADDR;
+    pins->clk_mode   = BOARD_ETH_CLK_MODE;
+    pins->reset_pin  = BOARD_ETH_RESET_PIN;
+    pins->mdc_pin    = BOARD_ETH_MDC_PIN;
+    pins->mdio_pin   = BOARD_ETH_MDIO_PIN;
+    pins->power_pin  = BOARD_ETH_POWER_PIN;
+    return true;
+}
+
+bool board_profile_get_sd_pins(board_sd_pins_t* pins)
+{
+    if (pins == NULL) {
+        return false;
+    }
+    /* Mock matches productive ESP32 NAV: SD card SPI pins */
+    pins->miso_pin = BOARD_SD_MISO_PIN;
+    pins->mosi_pin = BOARD_SD_MOSI_PIN;
+    pins->sclk_pin = BOARD_SD_SCLK_PIN;
+    pins->cs_pin   = BOARD_SD_CS_PIN;
+    return true;
+}
+
+bool board_profile_get_misc_pins(board_misc_pins_t* pins)
+{
+    if (pins == NULL) {
+        return false;
+    }
+    /* Mock matches productive ESP32 NAV: Safety + Log Switch */
+    pins->safety_in_pin  = BOARD_SAFETY_IN_PIN;
+    pins->log_switch_pin = BOARD_LOG_SWITCH_PIN;
+    return true;
 }
 
 /* ---- GNSS Port Iteration (matching productive board_profile.c) ---- */

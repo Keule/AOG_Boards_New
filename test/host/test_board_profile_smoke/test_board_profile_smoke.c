@@ -5,10 +5,13 @@
  * combinations by using the board_profile_mock.c which mimics the
  * productive ESP32 profile.
  *
- * Expected for current NAV-RTCM-001 state:
- *   - GNSS_PRIMARY active → valid TX pin and RX pin
- *   - GNSS_SECONDARY active → valid TX pin and RX pin
+ * Expected for current NAV-BOARD-PINS-001 state:
+ *   - GNSS_PRIMARY: TX=GPIO2, RX=GPIO4 (Keule reference)
+ *   - GNSS_SECONDARY: TX=GPIO33, RX=GPIO35 (Keule reference)
  *   - Both have UART TX capability (has_uart_tx == true)
+ *   - ETH RMII pins: MDC=23, MDIO=18, POWER=12
+ *   - SD pins: MISO=34, MOSI=13, SCLK=14, CS=5
+ *   - Misc: SAFETY_IN=15, LOG_SWITCH=0
  *   - GNSS port iteration table contains both
  * ======================================================================== */
 
@@ -60,6 +63,85 @@ void test_esp32_nav_console_has_both_pins(void)
     TEST_ASSERT_TRUE(ok);
     TEST_ASSERT(pins.tx_pin >= 0);
     TEST_ASSERT(pins.rx_pin >= 0);
+}
+
+/* ---- NAV-BOARD-PINS-001: Exact pin value verification ---- */
+
+void test_gnss_primary_pins_match_keule_reference(void)
+{
+    board_uart_pins_t pins;
+    bool ok = board_profile_get_uart_pins(BOARD_UART_GNSS_PRIMARY, &pins);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL(BOARD_GNSS_UART1_TX_PIN, pins.tx_pin);  /* 2 */
+    TEST_ASSERT_EQUAL(BOARD_GNSS_UART1_RX_PIN, pins.rx_pin);  /* 4 */
+}
+
+void test_gnss_secondary_pins_match_keule_reference(void)
+{
+    board_uart_pins_t pins;
+    bool ok = board_profile_get_uart_pins(BOARD_UART_GNSS_SECONDARY, &pins);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL(BOARD_GNSS_UART2_TX_PIN, pins.tx_pin);  /* 33 */
+    TEST_ASSERT_EQUAL(BOARD_GNSS_UART2_RX_PIN, pins.rx_pin);  /* 35 */
+}
+
+void test_gnss_tx_pins_not_input_only(void)
+{
+    /* Classic ESP32: GPIO 34..39 are input-only — must NOT be TX */
+    board_uart_pins_t pins;
+    board_profile_get_uart_pins(BOARD_UART_GNSS_PRIMARY, &pins);
+    TEST_ASSERT_TRUE(pins.tx_pin < 34 || pins.tx_pin > 39);
+
+    board_profile_get_uart_pins(BOARD_UART_GNSS_SECONDARY, &pins);
+    TEST_ASSERT_TRUE(pins.tx_pin < 34 || pins.tx_pin > 39);
+}
+
+void test_gpio35_not_used_as_tx(void)
+{
+    /* Hard rule: GPIO35 must NOT be TX on any UART */
+    board_uart_pins_t pins;
+    board_profile_get_uart_pins(BOARD_UART_GNSS_PRIMARY, &pins);
+    TEST_ASSERT_NOT_EQUAL(35, pins.tx_pin);
+
+    board_profile_get_uart_pins(BOARD_UART_GNSS_SECONDARY, &pins);
+    TEST_ASSERT_NOT_EQUAL(35, pins.tx_pin);
+}
+
+/* ---- ETH RMII pin verification ---- */
+
+void test_eth_rmii_pins_available(void)
+{
+    board_eth_pins_t pins;
+    bool ok = board_profile_get_eth_pins(&pins);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL(BOARD_ETH_MDC_PIN, pins.mdc_pin);
+    TEST_ASSERT_EQUAL(BOARD_ETH_MDIO_PIN, pins.mdio_pin);
+    TEST_ASSERT_EQUAL(BOARD_ETH_POWER_PIN, pins.power_pin);
+    TEST_ASSERT_EQUAL(BOARD_ETH_RESET_PIN, pins.reset_pin);
+}
+
+/* ---- SD pin verification ---- */
+
+void test_sd_pins_available(void)
+{
+    board_sd_pins_t pins;
+    bool ok = board_profile_get_sd_pins(&pins);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL(BOARD_SD_MISO_PIN, pins.miso_pin);
+    TEST_ASSERT_EQUAL(BOARD_SD_MOSI_PIN, pins.mosi_pin);
+    TEST_ASSERT_EQUAL(BOARD_SD_SCLK_PIN, pins.sclk_pin);
+    TEST_ASSERT_EQUAL(BOARD_SD_CS_PIN, pins.cs_pin);
+}
+
+/* ---- Misc pin verification ---- */
+
+void test_misc_pins_available(void)
+{
+    board_misc_pins_t pins;
+    bool ok = board_profile_get_misc_pins(&pins);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL(BOARD_SAFETY_IN_PIN, pins.safety_in_pin);
+    TEST_ASSERT_EQUAL(BOARD_LOG_SWITCH_PIN, pins.log_switch_pin);
 }
 
 /* ---- GNSS Port Iteration ---- */
@@ -136,6 +218,30 @@ void test_invalid_port_no_tx(void)
     TEST_ASSERT_FALSE(board_profile_has_uart_tx((board_uart_port_t)99));
 }
 
+/* ---- Null pointer safety ---- */
+
+void test_eth_pins_null_returns_false(void)
+{
+    TEST_ASSERT_FALSE(board_profile_get_eth_pins(NULL));
+}
+
+void test_sd_pins_null_returns_false(void)
+{
+    TEST_ASSERT_FALSE(board_profile_get_sd_pins(NULL));
+}
+
+void test_misc_pins_null_returns_false(void)
+{
+    TEST_ASSERT_FALSE(board_profile_get_misc_pins(NULL));
+}
+
+/* ---- Baudrate define ---- */
+
+void test_gnss_baudrate_is_921600(void)
+{
+    TEST_ASSERT_EQUAL(921600, BOARD_GNSS_UART_BAUDRATE);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -146,6 +252,21 @@ int main(void)
     RUN_TEST(test_esp32_nav_gnss_primary_has_tx);
     RUN_TEST(test_esp32_nav_gnss_secondary_has_tx);
     RUN_TEST(test_esp32_nav_console_has_both_pins);
+
+    /* NAV-BOARD-PINS-001: Exact pin values */
+    RUN_TEST(test_gnss_primary_pins_match_keule_reference);
+    RUN_TEST(test_gnss_secondary_pins_match_keule_reference);
+    RUN_TEST(test_gnss_tx_pins_not_input_only);
+    RUN_TEST(test_gpio35_not_used_as_tx);
+
+    /* ETH RMII */
+    RUN_TEST(test_eth_rmii_pins_available);
+
+    /* SD Card */
+    RUN_TEST(test_sd_pins_available);
+
+    /* Misc */
+    RUN_TEST(test_misc_pins_available);
 
     /* GNSS Port Iteration */
     RUN_TEST(test_gnss_port_iteration_table_complete);
@@ -162,6 +283,14 @@ int main(void)
     RUN_TEST(test_invalid_port_returns_no_pins);
     RUN_TEST(test_invalid_port_no_uart);
     RUN_TEST(test_invalid_port_no_tx);
+
+    /* Null pointer safety */
+    RUN_TEST(test_eth_pins_null_returns_false);
+    RUN_TEST(test_sd_pins_null_returns_false);
+    RUN_TEST(test_misc_pins_null_returns_false);
+
+    /* Baudrate */
+    RUN_TEST(test_gnss_baudrate_is_921600);
 
     return UNITY_END();
 }
