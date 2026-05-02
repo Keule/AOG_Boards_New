@@ -59,6 +59,11 @@ uint32_t runtime_stats_get_worst(void)
     return s_worst;
 }
 
+uint32_t runtime_stats_get_cycle_count(void)
+{
+    return s_count;
+}
+
 /* NAV-FIX-001 AP-C: Deadline miss tracking */
 
 void runtime_stats_record_deadline_miss(void)

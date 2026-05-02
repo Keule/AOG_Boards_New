@@ -24,6 +24,7 @@
 #include "aog_navigation_app.h"
 #include "nav_diagnostics.h"
 #include "hal_eth.h"
+#include "hw_runtime_diag.h"
 #endif
 
 /* ---- Steering subsystem includes ----
@@ -38,6 +39,8 @@
 #include "aog_steering_app.h"
 #include "transport_udp.h"
 #endif
+
+/* TAG defined at top of file via #define TAG "app_core" */
 
 /* ---- Constants ---- */
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
@@ -234,6 +237,9 @@ static ntrip_client_t  s_ntrip;
 static rtcm_router_t   s_rtcm_router;
 
 static aog_nav_app_t   s_nav_app;
+
+/* NAV-HW-RUNTIME-DIAG-001: Periodic hardware diagnostics */
+static hw_runtime_diag_t s_hw_diag;
 
 static nav_health_collector_t s_health_coll;
 /* s_health_snap / s_log_recovery: reserved for future NAV-DIAG subsystem expansion */
@@ -475,7 +481,19 @@ void app_core_init(void)
         nav_diag_log_set_emit_callback(app_core_diag_log_emit);
         ESP_LOGI(TAG, "NAV-DIAG health collector wired (10 subsystems)");
 
-        ESP_LOGI(TAG, "Navigation components registered: 10 "
+        /* --- NAV-HW-RUNTIME-DIAG-001: Hardware runtime diagnostics --- */
+        hw_runtime_diag_init(&s_hw_diag);
+        hw_runtime_diag_set_sources(&s_hw_diag,
+                                     &s_primary_uart,
+                                     &s_secondary_uart,
+                                     &s_primary_gnss,
+                                     &s_secondary_gnss,
+                                     &s_heading,
+                                     &s_nav_app);
+        s_hw_diag.component.service_group = SERVICE_GROUP_DIAGNOSTICS;
+        runtime_component_register(&s_hw_diag.component);
+
+        ESP_LOGI(TAG, "Navigation components registered: 11 "
                  "(uart=%u, udp=%u, tcp_ntrip=%u, diag=%u)",
                  (unsigned)runtime_component_count_group(SERVICE_GROUP_UART),
                  (unsigned)runtime_component_count_group(SERVICE_GROUP_UDP),

@@ -1,0 +1,6 @@
+{
+  "name": "hw_runtime_diag",
+  "version": "1.0.0",
+  "description": "NAV-HW-RUNTIME-DIAG-001: Periodic hardware runtime diagnostics (fast-loop, GNSS UART, snapshots, ETH/UDP, PGN214) at 0.2 Hz",
+  "dependencies": {}
+}

@@ -5,8 +5,12 @@
 #include "runtime_watchdog.h"
 
 #include "esp_timer.h"
+#include "esp_log.h"
+#include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+static const char* TAG = "RUNTIME_FAST";
 
 static void task_fast(void* arg)
 {
@@ -15,6 +19,10 @@ static void task_fast(void* arg)
     runtime_stats_init();
     runtime_watchdog_init();
     runtime_watchdog_register_task("task_fast");
+
+    /* NAV-HW-RUNTIME-DIAG-001 WP-A: One-time startup log */
+    ESP_LOGI(TAG, "started core=%d period_us=10000 components=%u",
+             xPortGetCoreID(), (unsigned)runtime_component_count());
 
     /* NAV-FIX-001 AP-C: vTaskDelayUntil for deterministic 100 Hz (10ms period).
      * vTaskDelay() causes cumulative jitter — each cycle starts 10ms AFTER

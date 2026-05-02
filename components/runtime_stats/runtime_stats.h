@@ -10,6 +10,7 @@ void runtime_stats_init(void);
 void runtime_stats_record(uint32_t cycle_duration_us);
 uint32_t runtime_stats_get_last(void);
 uint32_t runtime_stats_get_worst(void);
+uint32_t runtime_stats_get_cycle_count(void);
 
 /* NAV-FIX-001 AP-C: Deadline miss tracking for task_fast.
  * A deadline miss occurs when the actual wake time exceeds
