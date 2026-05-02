@@ -2,6 +2,8 @@
 #include <string.h>
 #include "esp_log.h"
 #include "app_core.h"
+
+#define TAG "app_core"
 #include "feature_flags.h"
 #include "board_profile.h"
 #include "runtime.h"
@@ -36,8 +38,6 @@
 #include "aog_steering_app.h"
 #include "transport_udp.h"
 #endif
-
-static const char* TAG = "APP_CORE";
 
 /* ---- Constants ---- */
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
@@ -120,7 +120,8 @@ static bool board_pin_sanity_check(void)
 
         /* Check TX not input-only */
         if (is_esp32_input_only_gpio(pins.tx_pin)) {
-            ESP_LOGE("BOARD_PIN_ERROR: %s UART TX=GPIO%d is input-only (GPIO%d..%d)",
+            ESP_LOGE("BOARD_PIN",
+                     "%s UART TX=GPIO%d is input-only (GPIO%d..%d)",
                      uart_names[i], pins.tx_pin,
                      ESP32_INPUT_ONLY_GPIO_MIN, ESP32_INPUT_ONLY_GPIO_MAX);
             ok = false;
@@ -128,8 +129,8 @@ static bool board_pin_sanity_check(void)
 
         /* Hard rule: GPIO35 must NOT be TX */
         if (pins.tx_pin == 35) {
-            ESP_LOGE("BOARD_PIN_ERROR: %s UART TX=GPIO35 violates hard rule "
-                     "(GPIO35 is input-only on classic ESP32)",
+            ESP_LOGE("BOARD_PIN",
+                     "%s UART TX=GPIO35 violates hard rule (GPIO35 is input-only on classic ESP32)",
                      uart_names[i]);
             ok = false;
         }
@@ -139,8 +140,8 @@ static bool board_pin_sanity_check(void)
     /* ---- Check Ethernet type ---- */
     ethernet_kind_t eth = board_profile_get_eth();
     if (eth == ETH_W5500_SPI) {
-        ESP_LOGE("BOARD_PIN_ERROR: NAV role requires ETH_INTERNAL_MAC_RMII, "
-                 "but board reports ETH_W5500_SPI");
+        ESP_LOGE("BOARD_PIN",
+                 "NAV role requires ETH_INTERNAL_MAC_RMII, but board reports ETH_W5500_SPI");
         ok = false;
     }
 #endif
@@ -163,6 +164,7 @@ static bool board_pin_sanity_check(void)
 static void board_pin_boot_log(void)
 {
     board_type_t board = board_profile_get_board();
+    (void)board;  /* logged via BOARD_PROFILE_NAME macro above */
 
     /* ---- Line 1: Profile & Role ---- */
     const char* role = "UNKNOWN";
@@ -234,8 +236,9 @@ static rtcm_router_t   s_rtcm_router;
 static aog_nav_app_t   s_nav_app;
 
 static nav_health_collector_t s_health_coll;
-static nav_health_snapshot_t  s_health_snap;
-static nav_diag_log_entry_t   s_log_recovery = NAV_DIAG_LOG_ENTRY_INIT(WARN);
+/* s_health_snap / s_log_recovery: reserved for future NAV-DIAG subsystem expansion */
+static nav_health_snapshot_t  s_health_snap __attribute__((unused));
+static nav_diag_log_entry_t   s_log_recovery __attribute__((unused));
 
 /* ---- NAV-DIAG: ESP32 log bridge ---- */
 static void app_core_diag_log_emit(nav_diag_level_t level,
