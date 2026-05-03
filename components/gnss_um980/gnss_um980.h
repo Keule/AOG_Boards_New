@@ -78,6 +78,8 @@ typedef struct {
     uint32_t sentences_parsed;     /* total valid sentences */
     uint32_t checksum_errors;      /* NMEA checksum mismatches */
     uint32_t overflow_errors;      /* sentence too long */
+    uint32_t binary_rejects;       /* non-printable byte in sentence (NAV-GNSS-NMEA-CORRUPTION-001) */
+    uint32_t garbage_discarded;    /* non-'$' bytes in IDLE state (RTCM binary) */
     uint32_t timeout_events;       /* freshness timeout count */
     uint32_t bytes_received;       /* total bytes fed */
 

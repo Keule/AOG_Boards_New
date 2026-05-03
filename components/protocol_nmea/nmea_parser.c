@@ -443,6 +443,20 @@ static void nmea_finalize_sentence(nmea_parser_t* parser)
     }
 }
 
+/* ---- Internal: capture bad line for diagnostic ---- */
+static void nmea_capture_bad_line(nmea_parser_t* parser, uint8_t reason)
+{
+    if (parser->index > 0) {
+        uint8_t len = parser->index > NMEA_MAX_SENTENCE_LEN - 1 ?
+                       NMEA_MAX_SENTENCE_LEN - 1 : parser->index;
+        memcpy(parser->bad_line, parser->buffer, len);
+        parser->bad_line_len = len;
+    } else {
+        parser->bad_line_len = 0;
+    }
+    parser->bad_line_reason = reason;
+}
+
 /* ---- Public API ---- */
 
 void nmea_parser_init(nmea_parser_t* parser)
@@ -462,6 +476,9 @@ nmea_result_t nmea_parser_feed(nmea_parser_t* parser, uint8_t byte)
             parser->result = NMEA_RESULT_INCOMPLETE;
             parser->type = NMEA_SENTENCE_NONE;
             parser->state = NMEA_STATE_DATA;
+        } else {
+            /* Non-'$' byte in IDLE: garbage (e.g. RTCM binary data) */
+            parser->garbage_discarded++;
         }
         return NMEA_RESULT_INCOMPLETE;
 
@@ -477,6 +494,16 @@ nmea_result_t nmea_parser_feed(nmea_parser_t* parser, uint8_t byte)
             parser->state = NMEA_STATE_IDLE;
             return NMEA_RESULT_INVALID_CHECKSUM;
         }
+        /* NAV-GNSS-NMEA-CORRUPTION-001 WP-E:
+         * Reject non-printable bytes. Valid NMEA only contains
+         * printable ASCII 0x20..0x7E. Binary bytes (RTCM, etc.)
+         * indicate the sentence is corrupted. */
+        if (byte < 0x20 || byte > 0x7E) {
+            parser->binary_rejects++;
+            nmea_capture_bad_line(parser, 0); /* reason=0: binary */
+            parser->state = NMEA_STATE_IDLE;
+            return NMEA_RESULT_BINARY_REJECT;
+        }
         if (parser->index < NMEA_MAX_SENTENCE_LEN - 1) {
             parser->buffer[parser->index++] = (char)byte;
             parser->calc_checksum ^= byte;
@@ -491,6 +518,8 @@ nmea_result_t nmea_parser_feed(nmea_parser_t* parser, uint8_t byte)
     case NMEA_STATE_CHECKSUM_H: {
         int val = nmea_hex_val(byte);
         if (val < 0) {
+            parser->malformed_csum++;
+            nmea_capture_bad_line(parser, 3); /* reason=3: malformed_csum */
             parser->state = NMEA_STATE_IDLE;
             return NMEA_RESULT_INVALID_CHECKSUM;
         }
@@ -502,6 +531,8 @@ nmea_result_t nmea_parser_feed(nmea_parser_t* parser, uint8_t byte)
     case NMEA_STATE_CHECKSUM_L: {
         int val = nmea_hex_val(byte);
         if (val < 0) {
+            parser->malformed_csum++;
+            nmea_capture_bad_line(parser, 3); /* reason=3: malformed_csum */
             parser->state = NMEA_STATE_IDLE;
             return NMEA_RESULT_INVALID_CHECKSUM;
         }
@@ -517,6 +548,10 @@ nmea_result_t nmea_parser_feed(nmea_parser_t* parser, uint8_t byte)
              * Clear type so downstream consumers cannot accidentally
              * use stale data from parser->data. */
             parser->type = NMEA_SENTENCE_NONE;
+            /* Capture diagnostic info */
+            nmea_capture_bad_line(parser, 1); /* reason=1: checksum */
+            parser->bad_parsed_csum = received;
+            parser->bad_computed_csum = parser->calc_checksum;
         }
         parser->state = NMEA_STATE_CR;
         return parser->result;

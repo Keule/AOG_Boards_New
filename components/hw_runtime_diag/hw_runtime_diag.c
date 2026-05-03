@@ -32,6 +32,7 @@
 #include "ntrip_client.h"
 #include "rtcm_router.h"
 #include "transport_tcp.h"
+#include "nmea_parser.h"
 
 static const char* TAG = "HW_DIAG";
 
@@ -205,7 +206,7 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         runtime_stats_reset_report_window((int64_t)timestamp_us);
     }
 
-    /* ---- WP-B: GNSS UART RX Counters (no underflow) ---- */
+    /* ---- GNSS UART RX Counters (NAV-GNSS-NMEA-CORRUPTION-001) ---- */
     {
         const transport_uart_t* p_uart = (const transport_uart_t*)diag->primary_uart;
         const gnss_um980_t*     p_gnss = (const gnss_um980_t*)diag->primary_gnss;
@@ -213,11 +214,13 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         if (p_uart != NULL && p_gnss != NULL) {
             ESP_LOGI("HW_DIAG",
                      "GNSS_RX: primary uart=1 bytes=%u lines=%u "
-                     "checksum_ok=%u checksum_bad=%u last=%s",
+                     "csum_ok=%u csum_bad=%u binary_reject=%u garbage=%u last=%s",
                      p_gnss->bytes_received,
                      p_gnss->sentences_parsed,
-                     saturated_sub(p_gnss->sentences_parsed, p_gnss->checksum_errors),
+                     p_gnss->sentences_parsed,
                      p_gnss->checksum_errors,
+                     p_gnss->binary_rejects,
+                     p_gnss->garbage_discarded,
                      last_sentence_type(p_gnss));
         }
 
@@ -227,13 +230,105 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         if (s_uart != NULL && s_gnss != NULL) {
             ESP_LOGI("HW_DIAG",
                      "GNSS_RX: secondary uart=2 bytes=%u lines=%u "
-                     "checksum_ok=%u checksum_bad=%u last=%s",
+                     "csum_ok=%u csum_bad=%u binary_reject=%u garbage=%u last=%s",
                      s_gnss->bytes_received,
                      s_gnss->sentences_parsed,
-                     saturated_sub(s_gnss->sentences_parsed, s_gnss->checksum_errors),
+                     s_gnss->sentences_parsed,
                      s_gnss->checksum_errors,
+                     s_gnss->binary_rejects,
+                     s_gnss->garbage_discarded,
                      last_sentence_type(s_gnss));
         }
+    }
+
+    /* ---- NAV-GNSS-NMEA-CORRUPTION-001: GNSS UART Buffer Diagnostics (WP-D) ---- */
+    {
+        const transport_uart_t* p_uart = (const transport_uart_t*)diag->primary_uart;
+        const transport_uart_t* s_uart = (const transport_uart_t*)diag->secondary_uart;
+        const rtcm_router_t*    router  = (const rtcm_router_t*)diag->rtcm_router;
+
+        if (p_uart != NULL) {
+            const transport_uart_stats_t* us = transport_uart_get_stats(p_uart);
+            uint32_t rx_buf_used = (uint32_t)byte_ring_buffer_available(&p_uart->rx_buffer);
+            uint32_t rx_buf_size = (uint32_t)p_uart->rx_buffer.capacity;
+            uint32_t tx_bytes = (us != NULL) ? us->tx_bytes_out : 0;
+            uint32_t tx_drops = (router != NULL && router->output_count >= 1)
+                                ? router->outputs[0].bytes_dropped : 0;
+            uint32_t rx_over = (us != NULL) ? us->rx_overflow_count : 0;
+
+            ESP_LOGI("HW_DIAG",
+                     "GNSS_UART: primary rx_bytes=%u rx_overruns=%u "
+                     "rx_ring=%u/%u tx_rtcm_bytes=%u tx_drops=%u",
+                     (us != NULL) ? us->rx_bytes_in : 0,
+                     (unsigned)rx_over,
+                     (unsigned)rx_buf_used, (unsigned)rx_buf_size,
+                     (unsigned)tx_bytes, (unsigned)tx_drops);
+        }
+
+        if (s_uart != NULL) {
+            const transport_uart_stats_t* us = transport_uart_get_stats(s_uart);
+            uint32_t rx_buf_used = (uint32_t)byte_ring_buffer_available(&s_uart->rx_buffer);
+            uint32_t rx_buf_size = (uint32_t)s_uart->rx_buffer.capacity;
+            uint32_t tx_bytes = (us != NULL) ? us->tx_bytes_out : 0;
+            uint32_t tx_drops = (router != NULL && router->output_count >= 2)
+                                ? router->outputs[1].bytes_dropped : 0;
+            uint32_t rx_over = (us != NULL) ? us->rx_overflow_count : 0;
+
+            ESP_LOGI("HW_DIAG",
+                     "GNSS_UART: secondary rx_bytes=%u rx_overruns=%u "
+                     "rx_ring=%u/%u tx_rtcm_bytes=%u tx_drops=%u",
+                     (us != NULL) ? us->rx_bytes_in : 0,
+                     (unsigned)rx_over,
+                     (unsigned)rx_buf_used, (unsigned)rx_buf_size,
+                     (unsigned)tx_bytes, (unsigned)tx_drops);
+        }
+    }
+
+    /* ---- NAV-GNSS-NMEA-CORRUPTION-001: GNSS Bad Line Diagnostic (WP-A/B, rate-limited) ---- */
+    {
+        const gnss_um980_t* p_gnss = (const gnss_um980_t*)diag->primary_gnss;
+        const gnss_um980_t* s_gnss = (const gnss_um980_t*)diag->secondary_gnss;
+
+        /* Rate-limit: only print once per diagnostic cycle (5s) */
+        static uint32_t s_bad_line_print_mask = 0;
+        uint32_t print_mask = 0;
+
+        if (p_gnss != NULL && p_gnss->checksum_errors > 0) {
+            print_mask |= 0x01;
+        }
+        if (s_gnss != NULL && s_gnss->checksum_errors > 0) {
+            print_mask |= 0x02;
+        }
+
+        if (p_gnss != NULL && (print_mask & 0x01) && !(s_bad_line_print_mask & 0x01)) {
+            const nmea_parser_t* np = &p_gnss->nmea_parser;
+            ESP_LOGW("HW_DIAG",
+                     "GNSS_BAD_CSUM: primary parsed=0x%02x computed=0x%02x "
+                     "reason=%s len=%u",
+                     (unsigned)np->bad_parsed_csum,
+                     (unsigned)np->bad_computed_csum,
+                     (np->bad_line_reason == 0) ? "binary" :
+                     (np->bad_line_reason == 1) ? "checksum" :
+                     (np->bad_line_reason == 2) ? "overflow" :
+                     (np->bad_line_reason == 3) ? "malformed_csum" : "unknown",
+                     (unsigned)np->bad_line_len);
+        }
+        if (s_gnss != NULL && (print_mask & 0x02) && !(s_bad_line_print_mask & 0x02)) {
+            const nmea_parser_t* np = &s_gnss->nmea_parser;
+            ESP_LOGW("HW_DIAG",
+                     "GNSS_BAD_CSUM: secondary parsed=0x%02x computed=0x%02x "
+                     "reason=%s len=%u",
+                     (unsigned)np->bad_parsed_csum,
+                     (unsigned)np->bad_computed_csum,
+                     (np->bad_line_reason == 0) ? "binary" :
+                     (np->bad_line_reason == 1) ? "checksum" :
+                     (np->bad_line_reason == 2) ? "overflow" :
+                     (np->bad_line_reason == 3) ? "malformed_csum" : "unknown",
+                     (unsigned)np->bad_line_len);
+        }
+
+        /* Toggle print mask: print on odd cycles, suppress on even */
+        s_bad_line_print_mask = print_mask;
     }
 
     /* ---- WP-C: GNSS Snapshot Health ---- */

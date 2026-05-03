@@ -25,7 +25,8 @@ typedef enum {
     NMEA_RESULT_INCOMPLETE = 0,     /* Still accumulating */
     NMEA_RESULT_VALID,              /* Complete with valid checksum */
     NMEA_RESULT_INVALID_CHECKSUM,   /* Complete with invalid checksum */
-    NMEA_RESULT_OVERFLOW            /* Sentence too long for buffer */
+    NMEA_RESULT_OVERFLOW,           /* Sentence too long for buffer */
+    NMEA_RESULT_BINARY_REJECT       /* Non-printable byte in sentence data */
 } nmea_result_t;
 
 /* ---- NMEA Data Structures ---- */
@@ -136,6 +137,18 @@ typedef struct {
         nmea_gsv_t gsv;
         nmea_gsa_t gsa;
     } data;
+
+    /* ---- NAV-GNSS-NMEA-CORRUPTION-001: Diagnostic counters ---- */
+    uint32_t binary_rejects;       /* binary byte detected mid-sentence */
+    uint32_t garbage_discarded;    /* non-'$' bytes discarded in IDLE */
+    uint32_t malformed_csum;       /* non-hex byte after '*' */
+
+    /* ---- Last bad line capture (for rate-limited diagnostic) ---- */
+    uint8_t  bad_line[NMEA_MAX_SENTENCE_LEN];
+    uint8_t  bad_line_len;
+    uint8_t  bad_line_reason;      /* 0=binary, 1=checksum, 2=overflow, 3=malformed_csum */
+    uint8_t  bad_parsed_csum;      /* parsed checksum hex value (for checksum failures) */
+    uint8_t  bad_computed_csum;    /* computed checksum (for checksum failures) */
 } nmea_parser_t;
 
 /* ---- API ---- */

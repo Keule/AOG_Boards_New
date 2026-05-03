@@ -214,10 +214,19 @@ uint32_t gnss_um980_feed(gnss_um980_t* rx, const uint8_t* data, size_t length)
         } else if (result == NMEA_RESULT_OVERFLOW) {
             rx->overflow_errors++;
             rx->snapshot.last_error = GNSS_ERR_OVERFLOW;
+        } else if (result == NMEA_RESULT_BINARY_REJECT) {
+            /* NAV-GNSS-NMEA-CORRUPTION-001 WP-E:
+             * Binary byte detected within sentence data.
+             * Parser has already reset to IDLE for resync. */
+            rx->binary_rejects++;
         }
     }
 
     rx->sentences_parsed += sentences_parsed;
+
+    /* Propagate parser diagnostic counters to GNSS instance */
+    rx->garbage_discarded = rx->nmea_parser.garbage_discarded;
+
     return sentences_parsed;
 }
 
