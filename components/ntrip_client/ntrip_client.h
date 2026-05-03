@@ -152,6 +152,9 @@ bool ntrip_client_is_started(const ntrip_client_t* client);
 /* Get state name as string (for debugging/logging) */
 const char* ntrip_client_state_name(ntrip_state_t state);
 
+/* Get error code name as string (for diagnostics) */
+const char* ntrip_client_error_str(ntrip_err_t err);
+
 /* Get reconnect counter */
 uint32_t ntrip_client_get_reconnect_count(const ntrip_client_t* client);
 

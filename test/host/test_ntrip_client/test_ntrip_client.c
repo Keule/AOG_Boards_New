@@ -16,7 +16,8 @@ void setUp(void)
     memset(&transport, 0, sizeof(transport));
 
     /* Init transport */
-    tcp_cfg.remote_ip = 0x01020304;  /* 1.2.3.4 */
+    memset(&tcp_cfg, 0, sizeof(tcp_cfg));
+    strncpy(tcp_cfg.hostname, "1.2.3.4", sizeof(tcp_cfg.hostname) - 1);
     tcp_cfg.remote_port = 2101;
     transport_tcp_init(&transport, &tcp_cfg);
 

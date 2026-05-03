@@ -9,7 +9,7 @@ set(LOCAL_SECRETS "${CMAKE_CURRENT_SOURCE_DIR}/nav_ntrip_secrets.local.h")
 
 if(EXISTS "${LOCAL_SECRETS}")
     message(STATUS "nav_config: Found local NTRIP secrets file — NTRIP config will be active")
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE NTRIP_SECRETS_AVAILABLE=1)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC NTRIP_SECRETS_AVAILABLE=1)
 else()
     message(STATUS "nav_config: No local NTRIP secrets file — NTRIP will stay disabled (copy .example.h to .local.h)")
 endif()

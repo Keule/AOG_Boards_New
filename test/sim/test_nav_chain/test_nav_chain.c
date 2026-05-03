@@ -132,7 +132,8 @@ void setUp(void)
     hal_uart_init(&s_sim_hal_ops);
 
     memset(&s_tcp, 0, sizeof(s_tcp));
-    transport_tcp_config_t tcp_cfg = { .remote_ip = 0x01020304, .remote_port = 2101 };
+    transport_tcp_config_t tcp_cfg = { .remote_port = 2101 };
+    strncpy(tcp_cfg.hostname, "1.2.3.4", sizeof(tcp_cfg.hostname) - 1);
     transport_tcp_init(&s_tcp, &tcp_cfg);
 
     memset(&s_ntrip, 0, sizeof(s_ntrip));

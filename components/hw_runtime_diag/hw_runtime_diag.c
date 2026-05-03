@@ -353,7 +353,7 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         }
     }
 
-    /* ---- WP-H: NTRIP Status Diagnostics (no secrets) ---- */
+    /* ---- WP-H + NAV-NTRIP-NONBLOCKING-001 WP-D: NTRIP Status Diagnostics ---- */
     {
         const hal_eth_status_t* eth_st = hal_eth_get_status();
         bool ntrip_eth = (eth_st != NULL && eth_st->initialized && eth_st->got_ip);
@@ -364,7 +364,7 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
             ntrip_state_t state = ntrip->state;
             bool started = ntrip->started;
 
-            /* Determine display state */
+            /* Determine display state with sub-reason */
             const char* display_state;
             const char* reason = "";
 
@@ -376,7 +376,30 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                 reason = "no_eth_ip";
             } else if (started) {
                 display_state = ntrip_state_str(state);
-                reason = "";
+                /* Add TCP sub-state for connecting state */
+                if (state == NTRIP_STATE_CONNECTING && ntrip->transport != NULL) {
+                    reason = transport_tcp_sub_state_name(
+                        transport_tcp_get_sub_state(ntrip->transport));
+                } else if (state == NTRIP_STATE_ERROR) {
+                    reason = ntrip_client_error_str(ntrip->last_error);
+                } else if (state == NTRIP_STATE_CONNECTED) {
+                    /* Show rx_bytes */
+                    uint32_t rx = ntrip_client_rtcm_available(ntrip);
+                    if (ntrip->transport != NULL) {
+                        rx = transport_tcp_get_total_rx(ntrip->transport);
+                    }
+                    ESP_LOGI("HW_DIAG",
+                             "NTRIP: eth_ready=%u config_ready=%u state=%s "
+                             "rx_bytes=%u reconnects=%u",
+                             (unsigned)ntrip_eth,
+                             (unsigned)config_ready,
+                             display_state,
+                             (unsigned)rx,
+                             (unsigned)ntrip->reconnect_count);
+                    goto ntrip_cfg_log;
+                } else if (state == NTRIP_STATE_RETRY_WAIT) {
+                    reason = "backoff";
+                }
             } else {
                 display_state = "ready";
                 reason = "";
@@ -389,7 +412,13 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      display_state,
                      reason[0] ? " reason=" : "",
                      reason);
+        } else {
+            ESP_LOGI("HW_DIAG", "NTRIP: eth_ready=%u config_ready=0 state=disabled reason=no_ntrip_ref",
+                     (unsigned)ntrip_eth);
+        }
 
+ntrip_cfg_log:
+        if (ntrip != NULL) {
             /* WP-H: Config fields — NEVER log password */
             ESP_LOGI("HW_DIAG",
                      "NTRIP_CFG: host=%s port=%u mount=%s user=%s password=%s",
@@ -398,9 +427,6 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      ntrip->config.mountpoint[0] ? "set" : "empty",
                      ntrip->config.username[0] ? "set" : "empty",
                      ntrip->config.password[0] ? "set" : "empty");
-        } else {
-            ESP_LOGI("HW_DIAG", "NTRIP: eth_ready=%u config_ready=0 state=disabled reason=no_ntrip_ref",
-                     (unsigned)ntrip_eth);
         }
     }
 }

@@ -1,7 +1,10 @@
 #include "ntrip_client.h"
+#include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
+
+static const char* TAG = "NTRIP_CLIENT";
 
 /* ---- State name ---- */
 
@@ -17,6 +20,27 @@ const char* ntrip_client_state_name(ntrip_state_t state)
     case NTRIP_STATE_ERROR:          return "error";
     case NTRIP_STATE_RETRY_WAIT:     return "retry_wait";
     default:                         return "unknown";
+    }
+}
+
+/* ---- Error name (for diagnostics) ---- */
+
+const char* ntrip_client_error_str(ntrip_err_t err)
+{
+    switch (err) {
+    case NTRIP_OK:                 return "ok";
+    case NTRIP_ERR_NOT_CONFIGURED: return "not_configured";
+    case NTRIP_ERR_NOT_CONNECTED:  return "not_connected";
+    case NTRIP_ERR_REQUEST_TOO_LARGE: return "request_too_large";
+    case NTRIP_ERR_AUTH_FAILED:    return "auth_failed";
+    case NTRIP_ERR_NOT_FOUND:      return "not_found";
+    case NTRIP_ERR_FORBIDDEN:      return "forbidden";
+    case NTRIP_ERR_TIMEOUT:        return "timeout";
+    case NTRIP_ERR_DISCONNECTED:   return "disconnected";
+    case NTRIP_ERR_INVALID_PARAM:  return "invalid_param";
+    case NTRIP_ERR_INTERNAL:       return "internal";
+    case NTRIP_ERR_TRANSPORT_WRITE:return "transport_error";
+    default:                       return "unknown";
     }
 }
 
@@ -404,11 +428,24 @@ void ntrip_client_service_step(runtime_component_t* comp, uint64_t timestamp_us)
                 transport_tcp_connect(client->transport);
                 client->connect_attempted = true;
             }
+            /* Check transport sub-state for error (DNS failure, TCP connect failure) */
+            {
+                tcp_sub_state_t tcp_sub = transport_tcp_get_sub_state(client->transport);
+                if (tcp_sub == TCP_SUB_ERROR) {
+                    int sock_err = transport_tcp_get_last_errno(client->transport);
+                    client->last_error = NTRIP_ERR_TRANSPORT_WRITE;
+                    ESP_LOGW(TAG, "NTRIP: transport error during connect (sock_err=%d)",
+                             sock_err);
+                    ntrip_client_transition(client, NTRIP_STATE_ERROR, timestamp_us);
+                    progressed = true;
+                    break;
+                }
+            }
             if (transport_tcp_is_connected(client->transport)) {
                 ntrip_client_transition(client, NTRIP_STATE_BUILD_REQUEST, timestamp_us);
                 progressed = true;
             }
-            /* If not connected yet, wait (real ESP32: lwip connecting) */
+            /* If not connected yet, wait — transport handles DNS/TCP nonblocking */
             break;
 
         case NTRIP_STATE_BUILD_REQUEST: {
@@ -503,6 +540,18 @@ void ntrip_client_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         }
 
         case NTRIP_STATE_CONNECTED:
+            /* Check for transport disconnection */
+            if (client->transport != NULL) {
+                tcp_sub_state_t tcp_sub = transport_tcp_get_sub_state(client->transport);
+                if (tcp_sub == TCP_SUB_ERROR) {
+                    int sock_err = transport_tcp_get_last_errno(client->transport);
+                    client->last_error = NTRIP_ERR_DISCONNECTED;
+                    ESP_LOGW(TAG, "NTRIP: transport disconnected (sock_err=%d)", sock_err);
+                    ntrip_client_transition(client, NTRIP_STATE_ERROR, timestamp_us);
+                    progressed = true;
+                    break;
+                }
+            }
             /* Forward RTCM data from TCP transport to RTCM output buffer */
             if (client->transport == NULL) {
                 break;

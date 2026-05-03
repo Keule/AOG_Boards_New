@@ -354,11 +354,13 @@ void app_core_init(void)
         };
         transport_udp_init(&s_aog_udp, &udp_cfg);
 
-        transport_tcp_config_t tcp_cfg = {
-            .remote_ip = 0,
-            .remote_port = NTRIP_DEFAULT_PORT
-        };
-        transport_tcp_init(&s_ntrip_tcp, &tcp_cfg);
+        /* TCP transport: placeholder init, real hostname is set after NTRIP secrets loaded */
+        {
+            transport_tcp_config_t tcp_cfg_init = {
+                .remote_port = NTRIP_DEFAULT_PORT
+            };
+            transport_tcp_init(&s_ntrip_tcp, &tcp_cfg_init);
+        }
 
         /* --- GNSS receivers --- */
         gnss_um980_init(&s_primary_gnss,   0, "GNSS_PRIMARY");
@@ -380,6 +382,8 @@ void app_core_init(void)
         ntrip_client_set_transport(&s_ntrip, &s_ntrip_tcp);
 
         ntrip_client_config_t ntrip_cfg = NTRIP_CLIENT_CONFIG_DEFAULT();
+        /* Temporary hostname for TCP transport — will be overridden from secrets */
+        char ntrip_hostname[NTRIP_MAX_HOST_LEN] = "";
 
 #ifdef NTRIP_SECRETS_AVAILABLE
         /* Include local secrets at compile time */
@@ -391,6 +395,7 @@ void app_core_init(void)
             strncpy(ntrip_cfg.mountpoint, NTRIP_MOUNTPOINT, sizeof(ntrip_cfg.mountpoint) - 1);
             strncpy(ntrip_cfg.username, NTRIP_USER, sizeof(ntrip_cfg.username) - 1);
             strncpy(ntrip_cfg.password, NTRIP_PASSWORD, sizeof(ntrip_cfg.password) - 1);
+            strncpy(ntrip_hostname, NTRIP_HOST, sizeof(ntrip_hostname) - 1);
             ESP_LOGI(TAG, "NTRIP: config loaded from local secrets (host=%s, mount=%s)",
                      NTRIP_HOST, NTRIP_MOUNTPOINT);
         } else {
@@ -401,6 +406,18 @@ void app_core_init(void)
 #endif
 
         ntrip_client_configure(&s_ntrip, &ntrip_cfg);
+
+        /* NAV-NTRIP-NONBLOCKING-001: TCP transport needs hostname for DNS resolution */
+        transport_tcp_disconnect(&s_ntrip_tcp);  /* Reset from stub init */
+        {
+            transport_tcp_config_t tcp_cfg_real = {
+                .remote_port = ntrip_cfg.port
+            };
+            strncpy(tcp_cfg_real.hostname, ntrip_hostname,
+                    TRANSPORT_TCP_HOSTNAME_MAX - 1);
+            transport_tcp_init(&s_ntrip_tcp, &tcp_cfg_real);
+        }
+        ntrip_client_set_transport(&s_ntrip, &s_ntrip_tcp);
 
         if (s_ntrip.config_valid) {
             ntrip_client_start(&s_ntrip);

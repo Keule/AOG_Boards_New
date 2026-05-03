@@ -1,2 +1,14 @@
-.pio
-.vscode
+.pio/
+.idea/
+.vscode/
+*.o
+*.a
+*.elf
+*.bin
+*.map
+.DS_Store
+
+# NAV-ETH-BRINGUP-001-R2 WP-G: NTRIP secret files (NEVER commit)
+*secrets.local*
+*ntrip*.local*
+components/nav_config/nav_ntrip_secrets.local.h
