@@ -1,5 +1,0 @@
-{
-    "name": "remote_diag",
-    "description": "Remote diagnostics HTTP server (NAV-REMOTE-DIAG-001)",
-    "version": "1.0.0"
-}

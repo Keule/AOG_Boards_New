@@ -7,7 +7,7 @@
  *
  * HARD RULES:
  *   - No code in task_fast / Core 1
- *   - HTTP server starts only after Ethernet got_ip
+ *   - HTTP server starts only after Ethernet link-up AND IP obtained
  *   - Missing values reported as "not_available" — endpoint never fails
  *   - No large web UI, no full CLI
  *
@@ -26,6 +26,11 @@ extern "C" {
 #define REMOTE_DIAG_HTTP_PORT       80
 #define REMOTE_DIAG_MAX_URI_HANDLERS 4
 
+/* ---- Fast loop alive threshold ----
+ * fast_alive = true if last runtime_stats_record() was within this many ms.
+ * At 100 Hz, one cycle = 10 ms. 500 ms = 50 missed cycles = clearly dead. */
+#define REMOTE_DIAG_FAST_ALIVE_MS  500
+
 /* ---- Remote Diag Instance ---- */
 typedef struct {
     runtime_component_t component;    /* MUST be first */
@@ -42,8 +47,8 @@ typedef struct {
     const void* rtcm_router;          /* rtcm_router_t* */
 
     /* ---- Internal state ---- */
-    bool     http_started;
-    uint64_t boot_time_us;            /* esp_timer_get_time() at first service_step */
+    void*     http_server;            /* httpd_handle_t (stored to prevent loss) */
+    uint64_t  boot_time_us;           /* esp_timer_get_time() at first service_step */
 } remote_diag_t;
 
 /* ---- API ---- */

@@ -10,6 +10,7 @@
  * ======================================================================== */
 
 #include "gnss_um980.h"
+#include "esp_timer.h"
 #include <string.h>
 
 /* ---- Internal: check if GGA fix_quality represents any valid fix ---- */
@@ -201,11 +202,20 @@ uint32_t gnss_um980_feed(gnss_um980_t* rx, const uint8_t* data, size_t length)
                 rx->gst_dirty = true;
                 break;
 
+            case NMEA_SENTENCE_GSA:
+                rx->gsa_count++;
+                break;
+
+            case NMEA_SENTENCE_GSV:
+                rx->gsv_count++;
+                break;
+
             default:
-                /* GSA, GSV: parsed by nmea_parser but not stored in gnss_um980.
-                 * Future Work per NAV-GNSS-VALID-001. */
                 break;
             }
+            /* R2: Track last valid sentence type and timestamp */
+            rx->last_sentence_type = (uint32_t)rx->nmea_parser.type;
+            rx->last_sentence_us = (uint64_t)esp_timer_get_time();
         } else if (result == NMEA_RESULT_INVALID_CHECKSUM) {
             rx->checksum_errors++;
             rx->snapshot.last_error = GNSS_ERR_CHECKSUM;

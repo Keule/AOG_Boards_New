@@ -564,6 +564,8 @@ void ntrip_client_service_step(runtime_component_t* comp, uint64_t timestamp_us)
                     size_t pulled = transport_tcp_rx_read(client->transport, tmp, to_read);
                     if (pulled > 0) {
                         byte_ring_buffer_write(&client->rtcm_buffer, tmp, pulled);
+                        client->bytes_rx_total += (uint32_t)pulled;
+                        client->last_rx_us = timestamp_us;
                     }
                 }
             }

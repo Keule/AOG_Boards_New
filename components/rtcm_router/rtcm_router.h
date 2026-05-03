@@ -22,6 +22,7 @@ typedef struct {
     bool                enabled;
     uint32_t            bytes_forwarded;
     uint32_t            bytes_dropped;
+    uint64_t            last_activity_us;  /* R2: timestamp of last forward (us) */
 } rtcm_output_t;
 
 /* ---- RTCM Router Instance ----

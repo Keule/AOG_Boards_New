@@ -115,6 +115,10 @@ typedef struct {
     ntrip_err_t last_error;
     int         http_status_code;
 
+    /* ---- Cumulative statistics (R2) ---- */
+    uint32_t     bytes_rx_total;         /* total RTCM bytes received from NTRIP caster */
+    uint64_t     last_rx_us;              /* timestamp of last received RTCM data */
+
     /* RTCM output buffer (owned) */
     uint8_t             rtcm_storage[512];
     byte_ring_buffer_t  rtcm_buffer;

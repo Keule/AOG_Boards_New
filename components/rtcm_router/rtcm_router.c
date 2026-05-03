@@ -25,6 +25,7 @@ int rtcm_router_add_output(rtcm_router_t* router, byte_ring_buffer_t* tx_buffer)
     out->enabled = true;
     out->bytes_forwarded = 0;
     out->bytes_dropped = 0;
+    out->last_activity_us = 0;
 
     return (int)router->output_count++;
 }
@@ -75,6 +76,7 @@ void rtcm_router_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         size_t written = byte_ring_buffer_write(out->tx_buffer, tmp, pulled);
         if (written > 0) {
             out->bytes_forwarded += (uint32_t)written;
+            out->last_activity_us = timestamp_us;
             rtcm_passthrough_record_out(&router->passthrough, written);
         }
 

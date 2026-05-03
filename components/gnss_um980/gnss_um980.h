@@ -87,6 +87,8 @@ typedef struct {
     uint32_t gga_count;
     uint32_t rmc_count;
     uint32_t gst_count;
+    uint32_t gsa_count;             /* R2: GSA sentence counter */
+    uint32_t gsv_count;             /* R2: GSV sentence counter */
 
     /* ---- Dirty flags (set in feed, cleared in rebuild) ---- */
     bool gga_dirty;
@@ -95,6 +97,10 @@ typedef struct {
 
     /* ---- Timing ---- */
     uint64_t last_service_ms;      /* last service_step timestamp (ms) */
+
+    /* ---- R2: Last sentence tracking ---- */
+    uint64_t last_sentence_us;      /* timestamp of last valid sentence (us) */
+    uint32_t last_sentence_type;    /* nmea_sentence_type_t of last valid sentence */
 } gnss_um980_t;
 
 /* ---- API ---- */

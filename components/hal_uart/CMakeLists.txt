@@ -16,5 +16,5 @@ endif()
 idf_component_register(
     SRCS ${HAL_UART_COMMON} ${HAL_UART_PLATFORM}
     INCLUDE_DIRS "."
-    REQUIRES hal_backend board_profiles esp_driver_uart log
+    REQUIRES hal_backend board_profiles driver log esp_driver_uart
 )
