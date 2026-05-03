@@ -51,6 +51,14 @@ extern "C" {
  *
  * IMPORTANT: runtime_component_t MUST be the first field for safe casting. */
 
+/* ---- Output Mode Selection (NAV-AGIO-REALTEST-001) ----
+ * REAL_GNSS: Use live GNSS snapshot data (default, production mode)
+ * SYNTHETIC: Use predefined test data for AgIO end-to-end testing */
+typedef enum {
+    AOG_MODE_REAL_GNSS = 0,
+    AOG_MODE_SYNTHETIC = 1
+} aog_output_mode_t;
+
 /* ---- Output Gating State (NAV-AOG-001 FINAL HARDENING) ----
  *
  * 8-state model covering all GNSS + Heading combinations.
@@ -122,6 +130,20 @@ typedef enum {
 #define AOG_HEADING_FRESHNESS_MS_MIN      500   /* 500ms floor */
 #define AOG_HEADING_FRESHNESS_MS_MAX      10000 /* 10s cap */
 
+/* ---- Synthetic Test Data (NAV-AGIO-REALTEST-001) ----
+ * Fixed test position: Berlin, Germany (plausible for testing)
+ * When AOG_MODE_SYNTHETIC is active, these values are used instead of GNSS snapshot. */
+#define AOG_SYNTHETIC_LATITUDE        52.516274     /* Berlin Alexanderplatz */
+#define AOG_SYNTHETIC_LONGITUDE       13.377704     /* Berlin Alexanderplatz */
+#define AOG_SYNTHETIC_ALTITUDE        38.5f         /* meters above geoid */
+#define AOG_SYNTHETIC_SPEED_KMH       0.8f          /* slow speed for plausibility */
+#define AOG_SYNTHETIC_HEADING_DEG     45.0f         /* initial heading (degrees) */
+#define AOG_SYNTHETIC_FIX_QUALITY     AOG_FIX_RTK_FIX
+#define AOG_SYNTHETIC_SATELLITES      14
+#define AOG_SYNTHETIC_HDOP_X100       80            /* 0.80 */
+#define AOG_SYNTHETIC_AGE_X100        0             /* age not applicable */
+#define AOG_SYNTHETIC_RATE_DIVISOR    10            /* 100Hz / 10 = 10 Hz send rate */
+
 typedef struct {
     runtime_component_t component;    /* MUST be first */
 
@@ -143,6 +165,27 @@ typedef struct {
     /* NOTE: aog_send_interval_ms removed in NAV-FIX-001-R2.
      * PGN214 is emitted every fast tick (100 Hz / 10 ms).
      * No separate interval gating needed. */
+
+    /* Output mode (NAV-AGIO-REALTEST-001) */
+    aog_output_mode_t output_mode;
+    
+    /* Synthetic mode state */
+    uint32_t           synthetic_tick;        /* tick counter for rate control */
+    float              synthetic_heading;     /* slowly rotating heading (degrees) */
+
+    /* Drop tracking (NAV-AGIO-REALTEST-001) */
+    uint32_t           pgn214_drop_count;     /* cycles where output was suppressed/sentinel */
+    aog_output_state_t last_drop_reason;      /* last non-OK output state */
+    
+    /* Last encoded data for diagnostics */
+    double             last_pgn214_lat;
+    double             last_pgn214_lon;
+    uint8_t            last_pgn214_fix;
+    uint8_t            last_pgn214_rtk;
+    uint64_t           last_pgn214_send_us;   /* timestamp of last PGN214 encode */
+    
+    /* Effective send rate tracking */
+    uint32_t           pgn214_send_interval_ticks;  /* ticks between sends (1 = 100Hz, 10 = 10Hz) */
 
     /* Heading freshness tracking */
     uint32_t           heading_freshness_ms;
@@ -189,6 +232,15 @@ void aog_nav_app_set_src_address(aog_nav_app_t* app, uint8_t src);
 
 /* Set heading freshness timeout in ms (clamped). */
 void aog_nav_app_set_heading_freshness(aog_nav_app_t* app, uint32_t timeout_ms);
+
+/* Set output mode (REAL_GNSS or SYNTHETIC). Default: REAL_GNSS. */
+void aog_nav_app_set_output_mode(aog_nav_app_t* app, aog_output_mode_t mode);
+
+/* Get output mode string for diagnostics. */
+const char* aog_output_mode_str(aog_output_mode_t mode);
+
+/* Get drop reason string for diagnostics. */
+const char* aog_drop_reason_str(aog_output_state_t state);
 
 /* ---- Fast Path Hooks (Core 1, 100 Hz) ---- */
 

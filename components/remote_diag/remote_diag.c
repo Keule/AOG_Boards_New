@@ -493,21 +493,31 @@ static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
         }
     }
 
-    /* AOG / PGN 214 */
+    /* AOG / PGN 214 — NAV-AGIO-REALTEST-001 enhanced */
     {
         const aog_nav_app_t* app = as_nav_app(diag->nav_app);
         if (app != NULL) {
-            jw_kv_uint(&jw, "pgn214_sent", app->pgn214_send_count);
-            jw_kv_uint(&jw, "aog_cycles", app->cycle_count);
-            jw_kv_bool(&jw, "aog_position_valid", app->gnss_output_active);
-            jw_kv_bool(&jw, "aog_heading_valid", app->heading_output_active);
-            if (app->pgn214_send_count > 0) {
-                uint64_t age = 10;  /* 100 Hz = 10ms per frame */
-                jw_printf(&jw, "\"pgn214_last_send_age_ms\":%llu,", (unsigned long long)age);
+            jw_kv_str(&jw, "aog_output_mode", aog_output_mode_str(app->output_mode));
+            jw_kv_bool(&jw, "pgn214_enabled", true);
+            jw_printf(&jw, "\"pgn214_rate_hz\":%u,", app->pgn214_send_interval_ticks > 0 ? (unsigned)(100 / app->pgn214_send_interval_ticks) : 0);
+            jw_kv_uint(&jw, "pgn214_send_count", app->pgn214_send_count);
+            jw_kv_uint(&jw, "pgn214_drop_count", app->pgn214_drop_count);
+            jw_kv_str(&jw, "pgn214_drop_reason", aog_drop_reason_str(app->last_drop_reason));
+            if (app->pgn214_send_count > 0 && app->last_pgn214_send_us > 0) {
+                uint64_t age_ms = (now_us() > app->last_pgn214_send_us) ? (now_us() - app->last_pgn214_send_us) / 1000 : 0;
+                jw_printf(&jw, "\"pgn214_last_send_age_ms\":%llu,", (unsigned long long)age_ms);
             } else {
                 jw_kv_str(&jw, "pgn214_last_send_age_ms", "never");
             }
-            jw_kv_str(&jw, "pgn214_drops", "not_available");
+            jw_kv_str(&jw, "pgn214_source", "GNSS1_primary");
+            jw_printf(&jw, "\"pgn214_last_lat\":%.7f,", app->last_pgn214_lat);
+            jw_printf(&jw, "\"pgn214_last_lon\":%.7f,", app->last_pgn214_lon);
+            jw_printf(&jw, "\"pgn214_last_fix\":%u,", (unsigned)app->last_pgn214_fix);
+            jw_printf(&jw, "\"pgn214_last_rtk\":%u,", (unsigned)app->last_pgn214_rtk);
+            jw_kv_uint(&jw, "aog_cycles", app->cycle_count);
+            jw_kv_bool(&jw, "aog_position_valid", app->gnss_output_active);
+            jw_kv_bool(&jw, "aog_heading_valid", app->heading_output_active);
+            jw_kv_str(&jw, "output_state", aog_drop_reason_str(app->output_state));
         } else {
             jw_kv_str(&jw, "aog", "not_available");
         }
@@ -549,8 +559,17 @@ static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
         const transport_udp_t* udp = as_udp(diag->udp);
         if (udp != NULL) {
             jw_kv_bool(&jw, "udp_bound", udp->status.bound);
-            jw_kv_str(&jw, "udp_tx_packets", "not_available");
-            jw_kv_str(&jw, "udp_tx_errors", "not_available");
+            jw_kv_bool(&jw, "udp_has_ip", udp->status.has_ip);
+            jw_printf(&jw, "\"aog_udp_target_ip\":\"%u.%u.%u.%u\",",
+                (unsigned)(udp->remote_ip & 0xFF),
+                (unsigned)((udp->remote_ip >> 8) & 0xFF),
+                (unsigned)((udp->remote_ip >> 16) & 0xFF),
+                (unsigned)((udp->remote_ip >> 24) & 0xFF));
+            jw_printf(&jw, "\"aog_udp_target_port\":%u,", (unsigned)udp->remote_port);
+            jw_printf(&jw, "\"aog_udp_local_port\":%u,", (unsigned)udp->local_port);
+            jw_printf(&jw, "\"aog_udp_tx_packets\":%u,", (unsigned)udp->status.tx_packets);
+            jw_printf(&jw, "\"aog_udp_tx_errors\":%u,", (unsigned)udp->status.tx_errors);
+            jw_printf(&jw, "\"aog_udp_rx_packets\":%u,", (unsigned)udp->status.rx_packets);
         } else {
             jw_kv_str(&jw, "udp", "not_available");
         }
@@ -729,17 +748,59 @@ static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
         }
     }
 
-    /* AOG */
+    /* AOG — NAV-AGIO-REALTEST-001 enhanced */
     {
         const aog_nav_app_t* app = as_nav_app(diag->nav_app);
         if (app != NULL) {
+            const char* send_age = "never";
+            char send_age_buf[32];
+            if (app->pgn214_send_count > 0 && app->last_pgn214_send_us > 0) {
+                uint64_t a = (now_us() > app->last_pgn214_send_us) ? (now_us() - app->last_pgn214_send_us) / 1000 : 0;
+                snprintf(send_age_buf, sizeof(send_age_buf), "%llums", (unsigned long long)a);
+                send_age = send_age_buf;
+            }
             o += snprintf(buf + o, buf_size - o,
-                "AOG: pgn214_sent=%lu cycles=%lu pos_valid=%s hdg_valid=%s\n",
-                (unsigned long)app->pgn214_send_count, (unsigned long)app->cycle_count,
+                "AOG: mode=%s pgn214_sent=%lu drops=%lu drop_reason=%s "
+                "rate=%uHz send_age=%s state=%s\n"
+                "  pos_valid=%s hdg_valid=%s cycles=%lu source=GNSS1_primary\n"
+                "  last_lat=%.7f last_lon=%.7f fix=%u rtk=%u\n",
+                aog_output_mode_str(app->output_mode),
+                (unsigned long)app->pgn214_send_count,
+                (unsigned long)app->pgn214_drop_count,
+                aog_drop_reason_str(app->last_drop_reason),
+                app->pgn214_send_interval_ticks > 0 ? (unsigned)(100 / app->pgn214_send_interval_ticks) : 0,
+                send_age,
+                aog_drop_reason_str(app->output_state),
                 app->gnss_output_active ? "yes" : "no",
-                app->heading_output_active ? "yes" : "no");
+                app->heading_output_active ? "yes" : "no",
+                (unsigned long)app->cycle_count,
+                app->last_pgn214_lat,
+                app->last_pgn214_lon,
+                (unsigned)app->last_pgn214_fix,
+                (unsigned)app->last_pgn214_rtk);
         } else {
             o += snprintf(buf + o, buf_size - o, "AOG: not_available\n");
+        }
+    }
+
+    /* UDP stats */
+    {
+        const transport_udp_t* udp = as_udp(diag->udp);
+        if (udp != NULL) {
+            o += snprintf(buf + o, buf_size - o,
+                "UDP: bound=%s has_ip=%s target=%u.%u.%u.%u:%u local=%u "
+                "tx_pkts=%lu tx_err=%lu rx_pkts=%lu\n",
+                udp->status.bound ? "yes" : "no",
+                udp->status.has_ip ? "yes" : "no",
+                (unsigned)(udp->remote_ip & 0xFF),
+                (unsigned)((udp->remote_ip >> 8) & 0xFF),
+                (unsigned)((udp->remote_ip >> 16) & 0xFF),
+                (unsigned)((udp->remote_ip >> 24) & 0xFF),
+                (unsigned)udp->remote_port,
+                (unsigned)udp->local_port,
+                (unsigned long)udp->status.tx_packets,
+                (unsigned long)udp->status.tx_errors,
+                (unsigned long)udp->status.rx_packets);
         }
     }
 }
@@ -773,7 +834,7 @@ static esp_err_t version_handler(httpd_req_t* req)
     const char* v =
         "aog_esp_multiboard\n"
         "framework: esp-idf (platformio)\n"
-        "task: NAV-REMOTE-DIAG-001-R2 + NAV-GNSS-OUTDOOR-VALID-001\n";
+        "task: NAV-REMOTE-DIAG-001-R2 + NAV-GNSS-OUTDOOR-VALID-001 + NAV-AGIO-REALTEST-001\n";
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_send(req, v, strlen(v));
     return ESP_OK;

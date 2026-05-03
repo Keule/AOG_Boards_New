@@ -494,6 +494,10 @@ void app_core_init(void)
         aog_nav_app_set_aog_rx_source(&s_nav_app, &s_aog_udp.rx_buffer);
         aog_nav_app_set_aog_tx_dest(&s_nav_app, &s_aog_udp.tx_buffer);
 
+#if defined(AOG_SYNTHETIC_MODE) && AOG_SYNTHETIC_MODE
+        aog_nav_app_set_output_mode(&s_nav_app, AOG_MODE_SYNTHETIC);
+#endif
+
         /* --- Assign service groups and register components ---
          * Each component is assigned to its dedicated Core-0 service task group. */
         s_primary_uart.component.service_group   = SERVICE_GROUP_UART;

@@ -56,6 +56,32 @@ static uint8_t fix_quality_to_raw(gnss_fix_quality_t fq)
     }
 }
 
+/* ---- Output mode string (NAV-AGIO-REALTEST-001) ---- */
+const char* aog_output_mode_str(aog_output_mode_t mode)
+{
+    switch (mode) {
+    case AOG_MODE_SYNTHETIC: return "SYNTHETIC";
+    case AOG_MODE_REAL_GNSS:
+    default:                 return "REAL_GNSS";
+    }
+}
+
+/* ---- Drop reason string (NAV-AGIO-REALTEST-001) ---- */
+const char* aog_drop_reason_str(aog_output_state_t state)
+{
+    switch (state) {
+    case AOG_OUTPUT_OK:               return "NONE";
+    case AOG_OUTPUT_INIT:             return "INIT";
+    case AOG_OUTPUT_GNSS_INVALID:     return "GNSS_NOT_VALID";
+    case AOG_OUTPUT_GNSS_STALE:       return "GNSS_NOT_FRESH";
+    case AOG_OUTPUT_HEADING_INVALID:  return "HEADING_INVALID";
+    case AOG_OUTPUT_HEADING_STALE:    return "HEADING_STALE";
+    case AOG_OUTPUT_HEADING_LOST:     return "HEADING_LOST";
+    case AOG_OUTPUT_SUPPRESSED:       return "SUPPRESSED";
+    default:                         return "UNKNOWN";
+    }
+}
+
 /* ==================================================================
  * FAST_INPUT: Read incoming AOG RX frames from buffer.
  * Parses Hello/Scan requests and sets pending flags.
@@ -159,6 +185,59 @@ void aog_nav_app_fast_process(runtime_component_t* comp, const fast_cycle_contex
     }
 
     /* ==================================================================
+     * PGN 214 OUTPUT MODE SELECTION (NAV-AGIO-REALTEST-001)
+     * ================================================================== */
+    if (app->output_mode == AOG_MODE_SYNTHETIC) {
+        /* SYNTHETIC MODE: Send predefined test data at reduced rate.
+         * This bypasses GNSS snapshot reading for end-to-end testing. */
+        app->synthetic_tick++;
+        if ((app->synthetic_tick % AOG_SYNTHETIC_RATE_DIVISOR) != 0) {
+            return;  /* Skip this tick — rate limiting */
+        }
+
+        /* Slowly rotate heading for visual effect on AgIO map */
+        app->synthetic_heading += 0.5f;
+        if (app->synthetic_heading >= 360.0f) {
+            app->synthetic_heading -= 360.0f;
+        }
+
+        uint8_t pgn_buf[AOG_PGN214_DATA_SIZE];
+        aog_pgn214_t pgn214;
+        memset(&pgn214, 0, sizeof(pgn214));
+
+        pgn214.longitude     = AOG_SYNTHETIC_LONGITUDE;
+        pgn214.latitude      = AOG_SYNTHETIC_LATITUDE;
+        pgn214.altitude      = AOG_SYNTHETIC_ALTITUDE;
+        pgn214.speed_kmh     = AOG_SYNTHETIC_SPEED_KMH;
+        pgn214.heading_dual  = app->synthetic_heading;
+        pgn214.heading_true  = app->synthetic_heading;
+        pgn214.satellites    = AOG_SYNTHETIC_SATELLITES;
+        pgn214.fix_quality   = AOG_SYNTHETIC_FIX_QUALITY;
+        pgn214.hdop_x100     = AOG_SYNTHETIC_HDOP_X100;
+        pgn214.age_x100      = AOG_SYNTHETIC_AGE_X100;
+        pgn214.roll          = AOG_SENTINEL_FLOAT;
+        pgn214.imu_heading_x10 = AOG_SENTINEL_U16;
+        pgn214.imu_roll_x10    = AOG_SENTINEL_I16;
+        pgn214.imu_pitch       = AOG_SENTINEL_I16;
+        pgn214.imu_yaw_rate    = AOG_SENTINEL_I16;
+
+        aog_pgn_encode_pgn214(pgn_buf, &pgn214);
+        push_aog_pgn(app, AOG_PGN_214_OUT, pgn_buf, AOG_PGN214_DATA_SIZE);
+
+        app->pgn214_send_count++;
+        app->output_state = AOG_OUTPUT_OK;
+        app->gnss_output_active = true;
+        app->heading_output_active = true;
+        app->last_pgn214_lat = AOG_SYNTHETIC_LATITUDE;
+        app->last_pgn214_lon = AOG_SYNTHETIC_LONGITUDE;
+        app->last_pgn214_fix = AOG_SYNTHETIC_FIX_QUALITY;
+        app->last_pgn214_rtk = AOG_FIX_RTK_FIX;
+        app->last_pgn214_send_us = ctx->timestamp_us;
+        app->pgn214_send_interval_ticks = AOG_SYNTHETIC_RATE_DIVISOR;
+        return;
+    }
+
+    /* ==================================================================
      * PGN 214 OUTPUT — every 100 Hz tick (10 ms)
      *
      * NAV-FIX-001-R2 AP-A: PGN214 is emitted every fast tick.
@@ -235,6 +314,12 @@ void aog_nav_app_fast_process(runtime_component_t* comp, const fast_cycle_contex
                     pgn_buf, AOG_PGN214_DATA_SIZE);
         app->pgn214_send_count++;
 
+        /* Diagnostics tracking (NAV-AGIO-REALTEST-001) */
+        app->last_drop_reason = app->output_state;
+        app->pgn214_drop_count++;
+        app->last_pgn214_send_us = ctx->timestamp_us;
+        app->pgn214_send_interval_ticks = 1;
+
     } else if (!gnss_fresh) {
         /* ---- GNSS STALE: degraded, suppress GPS data ---- */
         app->output_state = AOG_OUTPUT_GNSS_STALE;
@@ -249,6 +334,12 @@ void aog_nav_app_fast_process(runtime_component_t* comp, const fast_cycle_contex
         push_aog_pgn(app, AOG_PGN_214_OUT,
                     pgn_buf, AOG_PGN214_DATA_SIZE);
         app->pgn214_send_count++;
+
+        /* Diagnostics tracking (NAV-AGIO-REALTEST-001) */
+        app->last_drop_reason = app->output_state;
+        app->pgn214_drop_count++;
+        app->last_pgn214_send_us = ctx->timestamp_us;
+        app->pgn214_send_interval_ticks = 1;
 
     } else {
         /* ---- GNSS VALID + FRESH: build PGN 214 ---- */
@@ -328,6 +419,20 @@ void aog_nav_app_fast_process(runtime_component_t* comp, const fast_cycle_contex
         push_aog_pgn(app, AOG_PGN_214_OUT,
                     pgn_buf, AOG_PGN214_DATA_SIZE);
         app->pgn214_send_count++;
+
+        /* Diagnostics tracking (NAV-AGIO-REALTEST-001) */
+        app->last_pgn214_lat = pgn214.latitude;
+        app->last_pgn214_lon = pgn214.longitude;
+        app->last_pgn214_fix = pgn214.fix_quality;
+        app->last_pgn214_rtk = (pgn214.fix_quality >= AOG_FIX_RTK_FIX) ? pgn214.fix_quality : 0;
+        app->last_pgn214_send_us = ctx->timestamp_us;
+        app->pgn214_send_interval_ticks = 1;
+        if (app->output_state == AOG_OUTPUT_OK) {
+            app->last_drop_reason = AOG_OUTPUT_OK;
+        } else {
+            app->pgn214_drop_count++;
+            app->last_drop_reason = app->output_state;
+        }
     }
 }
 
@@ -363,6 +468,12 @@ void aog_nav_app_init(aog_nav_app_t* app)
     app->heading_freshness_ms = AOG_HEADING_FRESHNESS_MS_DEFAULT;
     app->output_state = AOG_OUTPUT_INIT;
 
+    /* NAV-AGIO-REALTEST-001 defaults */
+    app->output_mode = AOG_MODE_REAL_GNSS;
+    app->synthetic_heading = AOG_SYNTHETIC_HEADING_DEG;
+    app->pgn214_send_interval_ticks = 1;  /* 100 Hz default */
+    app->last_drop_reason = AOG_OUTPUT_INIT;
+
     /* NAV-FIX-001-R2 AP-B: Register 3-phase fast hooks.
      * AOG-NAV business logic runs ENTIRELY on Core 1 at 100 Hz.
      * service_step is explicitly set to NULL — no Core 0 business logic. */
@@ -370,6 +481,19 @@ void aog_nav_app_init(aog_nav_app_t* app)
     app->component.fast_input   = aog_nav_app_fast_input;
     app->component.fast_process = aog_nav_app_fast_process;
     app->component.fast_output  = aog_nav_app_fast_output;
+}
+
+void aog_nav_app_set_output_mode(aog_nav_app_t* app, aog_output_mode_t mode)
+{
+    if (app == NULL) return;
+    app->output_mode = mode;
+    if (mode == AOG_MODE_SYNTHETIC) {
+        app->pgn214_send_interval_ticks = AOG_SYNTHETIC_RATE_DIVISOR;
+        app->synthetic_tick = 0;
+        app->synthetic_heading = AOG_SYNTHETIC_HEADING_DEG;
+    } else {
+        app->pgn214_send_interval_ticks = 1;
+    }
 }
 
 void aog_nav_app_set_position_source(aog_nav_app_t* app, const snapshot_buffer_t* source)
