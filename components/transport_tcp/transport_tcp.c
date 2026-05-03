@@ -405,8 +405,10 @@ void transport_tcp_service_step(runtime_component_t* comp, uint64_t timestamp_us
                 tcp->total_rx_bytes += (uint32_t)written;
                 if (written < (size_t)n) {
                     /* RX buffer overflow — discard excess */
+                    uint32_t dropped = (uint32_t)((size_t)n - written);
+                    tcp->tcp_rx_drops += dropped;
                     ESP_LOGW(TAG, "TCP RX buffer overflow, discarded %u bytes",
-                             (unsigned)((size_t)n - written));
+                             (unsigned)dropped);
                 }
             } else if (n == 0) {
                 /* Remote closed connection */
@@ -521,4 +523,12 @@ uint32_t transport_tcp_get_total_tx(const transport_tcp_t* tcp)
         return 0;
     }
     return tcp->total_tx_bytes;
+}
+
+uint32_t transport_tcp_get_rx_drops(const transport_tcp_t* tcp)
+{
+    if (tcp == NULL) {
+        return 0;
+    }
+    return tcp->tcp_rx_drops;
 }

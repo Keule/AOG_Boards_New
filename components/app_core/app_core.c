@@ -550,7 +550,8 @@ void app_core_init(void)
                                      &s_heading,
                                      &s_nav_app,
                                      &s_aog_udp,
-                                     &s_ntrip);
+                                     &s_ntrip,
+                                     &s_rtcm_router);
         s_hw_diag.component.service_group = SERVICE_GROUP_DIAGNOSTICS;
         runtime_component_register(&s_hw_diag.component);
 

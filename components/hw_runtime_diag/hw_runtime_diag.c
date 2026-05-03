@@ -1,9 +1,10 @@
 /* ========================================================================
  * hw_runtime_diag.c — Hardware Runtime Diagnostics
- *   NAV-HW-RUNTIME-DIAG-001 + NAV-ETH-BRINGUP-001-R2
+ *   NAV-HW-RUNTIME-DIAG-001 + NAV-ETH-BRINGUP-001-R2 + NAV-RTCM-PIPELINE-001
  *
  * Periodic health reporter: fast-loop stats, GNSS UART RX counters,
- * GNSS snapshot validity, Ethernet/UDP status, NTRIP status, PGN214 TX.
+ * GNSS snapshot validity, Ethernet/UDP status, NTRIP status, PGN214 TX,
+ * RTCM pipeline diagnostics (router in/out/drops, UART TX bytes/drops).
  *
  * Runs in SERVICE_GROUP_DIAGNOSTICS on Core 0 at ~100ms period.
  * Actual output at 0.2 Hz (every 5 seconds) to avoid log spam.
@@ -29,6 +30,8 @@
 #include "hal_eth.h"
 #include "transport_udp.h"
 #include "ntrip_client.h"
+#include "rtcm_router.h"
+#include "transport_tcp.h"
 
 static const char* TAG = "HW_DIAG";
 
@@ -116,6 +119,7 @@ void hw_runtime_diag_init(hw_runtime_diag_t* diag)
     diag->nav_app = NULL;
     diag->udp = NULL;
     diag->ntrip = NULL;
+    diag->rtcm_router = NULL;
 }
 
 void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
@@ -126,7 +130,8 @@ void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
                                   const void* heading,
                                   const void* nav_app,
                                   const void* udp,
-                                  const void* ntrip)
+                                  const void* ntrip,
+                                  const void* rtcm_router)
 {
     if (diag == NULL) return;
     diag->primary_uart = primary_uart;
@@ -137,6 +142,7 @@ void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
     diag->nav_app = nav_app;
     diag->udp = udp;
     diag->ntrip = ntrip;
+    diag->rtcm_router = rtcm_router;
 }
 
 /* =================================================================
@@ -383,19 +389,22 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                 } else if (state == NTRIP_STATE_ERROR) {
                     reason = ntrip_client_error_str(ntrip->last_error);
                 } else if (state == NTRIP_STATE_CONNECTED) {
-                    /* Show rx_bytes */
-                    uint32_t rx = ntrip_client_rtcm_available(ntrip);
+                    /* Show rx_bytes + tcp_drops (NAV-RTCM-PIPELINE-001) */
+                    uint32_t rx = 0;
+                    uint32_t drops = 0;
                     if (ntrip->transport != NULL) {
                         rx = transport_tcp_get_total_rx(ntrip->transport);
+                        drops = transport_tcp_get_rx_drops(ntrip->transport);
                     }
                     ESP_LOGI("HW_DIAG",
                              "NTRIP: eth_ready=%u config_ready=%u state=%s "
-                             "rx_bytes=%u reconnects=%u",
+                             "rx_bytes=%u reconnects=%u tcp_drops=%u",
                              (unsigned)ntrip_eth,
                              (unsigned)config_ready,
                              display_state,
                              (unsigned)rx,
-                             (unsigned)ntrip->reconnect_count);
+                             (unsigned)ntrip->reconnect_count,
+                             (unsigned)drops);
                     goto ntrip_cfg_log;
                 } else if (state == NTRIP_STATE_RETRY_WAIT) {
                     reason = "backoff";
@@ -427,6 +436,68 @@ ntrip_cfg_log:
                      ntrip->config.mountpoint[0] ? "set" : "empty",
                      ntrip->config.username[0] ? "set" : "empty",
                      ntrip->config.password[0] ? "set" : "empty");
+        }
+    }
+
+    /* ---- NAV-RTCM-PIPELINE-001: RTCM Router Diagnostics ---- */
+    {
+        const rtcm_router_t* router = (const rtcm_router_t*)diag->rtcm_router;
+        if (router != NULL) {
+            const rtcm_stats_t* stats = rtcm_router_get_stats(router);
+
+            /* Per-output counters (max 2 outputs) */
+            uint32_t out1_fwd = 0, out1_drop = 0;
+            uint32_t out2_fwd = 0, out2_drop = 0;
+
+            if (router->output_count >= 1) {
+                out1_fwd  = router->outputs[0].bytes_forwarded;
+                out1_drop = router->outputs[0].bytes_dropped;
+            }
+            if (router->output_count >= 2) {
+                out2_fwd  = router->outputs[1].bytes_forwarded;
+                out2_drop = router->outputs[1].bytes_dropped;
+            }
+
+            uint32_t total_drops = (stats != NULL) ? stats->bytes_dropped : 0;
+            uint32_t in_bytes = (stats != NULL) ? stats->bytes_in : 0;
+
+            ESP_LOGI("HW_DIAG",
+                     "RTCM_ROUTER: in_bytes=%u out1_bytes=%u out2_bytes=%u drops=%u",
+                     (unsigned)in_bytes,
+                     (unsigned)out1_fwd,
+                     (unsigned)out2_fwd,
+                     (unsigned)total_drops);
+        }
+    }
+
+    /* ---- NAV-RTCM-PIPELINE-001: GNSS RTCM TX (UART) Diagnostics ---- */
+    {
+        const rtcm_router_t* router = (const rtcm_router_t*)diag->rtcm_router;
+        const transport_uart_t* p_uart = (const transport_uart_t*)diag->primary_uart;
+        const transport_uart_t* s_uart = (const transport_uart_t*)diag->secondary_uart;
+
+        /* Primary UART TX */
+        if (p_uart != NULL && router != NULL && router->output_count >= 1) {
+            const transport_uart_stats_t* ustats = transport_uart_get_stats(p_uart);
+            uint32_t tx_bytes = (ustats != NULL) ? ustats->tx_bytes_out : 0;
+            uint32_t drops = router->outputs[0].bytes_dropped;
+
+            ESP_LOGI("HW_DIAG",
+                     "GNSS_RTCM_TX: primary uart=1 tx_bytes=%u drops=%u",
+                     (unsigned)tx_bytes,
+                     (unsigned)drops);
+        }
+
+        /* Secondary UART TX */
+        if (s_uart != NULL && router != NULL && router->output_count >= 2) {
+            const transport_uart_stats_t* ustats = transport_uart_get_stats(s_uart);
+            uint32_t tx_bytes = (ustats != NULL) ? ustats->tx_bytes_out : 0;
+            uint32_t drops = router->outputs[1].bytes_dropped;
+
+            ESP_LOGI("HW_DIAG",
+                     "GNSS_RTCM_TX: secondary uart=2 tx_bytes=%u drops=%u",
+                     (unsigned)tx_bytes,
+                     (unsigned)drops);
         }
     }
 }

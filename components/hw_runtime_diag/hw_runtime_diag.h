@@ -57,6 +57,7 @@ typedef struct {
     const void* nav_app;           /* aog_nav_app_t* */
     const void* udp;               /* transport_udp_t*   (NAV-ETH-BRINGUP-001-R2 WP-B) */
     const void* ntrip;             /* ntrip_client_t*    (NAV-ETH-BRINGUP-001-R2 WP-H) */
+    const void* rtcm_router;       /* rtcm_router_t*    (NAV-RTCM-PIPELINE-001) */
 } hw_runtime_diag_t;
 
 /* Initialize diagnostic component.
@@ -73,7 +74,8 @@ void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
                                   const void* heading,
                                   const void* nav_app,
                                   const void* udp,
-                                  const void* ntrip);
+                                  const void* ntrip,
+                                  const void* rtcm_router);
 
 /* Service step: called from DIAG service group (Core 0, ~100ms period).
  * Prints health summary every 5 seconds. */
