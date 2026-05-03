@@ -1,11 +1,19 @@
 /* ========================================================================
- * hw_runtime_diag.c — Hardware Runtime Diagnostics (NAV-HW-RUNTIME-DIAG-001)
+ * hw_runtime_diag.c — Hardware Runtime Diagnostics
+ *   NAV-HW-RUNTIME-DIAG-001 + NAV-ETH-BRINGUP-001-R2
  *
  * Periodic health reporter: fast-loop stats, GNSS UART RX counters,
- * GNSS snapshot validity, Ethernet/UDP status, PGN214 TX counter.
+ * GNSS snapshot validity, Ethernet/UDP status, NTRIP status, PGN214 TX.
  *
  * Runs in SERVICE_GROUP_DIAGNOSTICS on Core 0 at ~100ms period.
  * Actual output at 0.2 Hz (every 5 seconds) to avoid log spam.
+ *
+ * Changes in NAV-ETH-BRINGUP-001-R2:
+ *   WP-A/C: UDP health reads real transport_udp_get_status()
+ *   WP-B:   Real UDP reference (no cast from nav_app)
+ *   WP-D:   GNSS checksum_ok saturated (no uint32 underflow)
+ *   WP-E:   Fast-loop: processing_us, remaining_us, real hz, period stats
+ *   WP-H:   NTRIP status diagnostics (config_ready, state, no secrets)
  * ======================================================================== */
 
 #include "hw_runtime_diag.h"
@@ -18,6 +26,9 @@
 #include "gnss_um980.h"
 #include "gnss_dual_heading.h"
 #include "aog_navigation_app.h"
+#include "hal_eth.h"
+#include "transport_udp.h"
+#include "ntrip_client.h"
 
 static const char* TAG = "HW_DIAG";
 
@@ -57,6 +68,28 @@ static const char* last_sentence_type(const gnss_um980_t* gnss)
     return "GGA";
 }
 
+/* ---- WP-D: Saturated subtraction for checksum_ok ---- */
+static uint32_t saturated_sub(uint32_t a, uint32_t b)
+{
+    return (a >= b) ? (a - b) : 0;
+}
+
+/* ---- NTRIP state name ---- */
+static const char* ntrip_state_str(ntrip_state_t state)
+{
+    switch (state) {
+        case NTRIP_STATE_IDLE:          return "disabled";
+        case NTRIP_STATE_CONNECTING:    return "connecting";
+        case NTRIP_STATE_BUILD_REQUEST: return "connecting";
+        case NTRIP_STATE_SEND_REQUEST:  return "connecting";
+        case NTRIP_STATE_WAIT_RESPONSE: return "connecting";
+        case NTRIP_STATE_CONNECTED:     return "connected";
+        case NTRIP_STATE_ERROR:         return "error";
+        case NTRIP_STATE_RETRY_WAIT:    return "retry_wait";
+        default:                        return "unknown";
+    }
+}
+
 /* =================================================================
  * Public API
  * ================================================================= */
@@ -81,6 +114,8 @@ void hw_runtime_diag_init(hw_runtime_diag_t* diag)
     diag->secondary_gnss = NULL;
     diag->heading = NULL;
     diag->nav_app = NULL;
+    diag->udp = NULL;
+    diag->ntrip = NULL;
 }
 
 void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
@@ -89,7 +124,9 @@ void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
                                   const void* primary_gnss,
                                   const void* secondary_gnss,
                                   const void* heading,
-                                  const void* nav_app)
+                                  const void* nav_app,
+                                  const void* udp,
+                                  const void* ntrip)
 {
     if (diag == NULL) return;
     diag->primary_uart = primary_uart;
@@ -98,6 +135,8 @@ void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
     diag->secondary_gnss = secondary_gnss;
     diag->heading = heading;
     diag->nav_app = nav_app;
+    diag->udp = udp;
+    diag->ntrip = ntrip;
 }
 
 /* =================================================================
@@ -121,24 +160,46 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         diag->last_print_ms = now_ms;
     }
 
-    /* ---- WP-A: Fast-Loop Health ---- */
+    /* ---- WP-E: Fast-Loop Health (precise) ---- */
     {
-        uint32_t cycles = runtime_stats_get_cycle_count();
+        uint32_t hz_centi = runtime_stats_get_hz_centi();
+        uint32_t report_cycles = runtime_stats_get_report_cycles();
+        uint64_t total_cycles = runtime_stats_get_total_cycles();
         uint32_t missed = runtime_stats_get_deadline_miss_count();
-        uint32_t worst  = runtime_stats_get_worst();
+        uint32_t processing_us = runtime_stats_get_processing_us();
+        uint32_t remaining_us = runtime_stats_get_remaining_us();
+        uint32_t period_avg_us = runtime_stats_get_period_avg_us();
+        uint32_t period_max_us = runtime_stats_get_period_max_us();
 
-        /* Derive approximate Hz from cycle count and elapsed time.
-         * cycles / elapsed_seconds. elapsed = now_ms / 1000.
-         * First print at ~2s, subsequent at 5s intervals. */
-        uint32_t elapsed_s = (uint32_t)(now_ms / 1000);
-        uint32_t hz = (elapsed_s > 0) ? (cycles / elapsed_s) : 0;
+        /* Format hz as integer or 1-decimal: e.g. 9980 -> "99.8" */
+        uint32_t hz_int = hz_centi / 100;
+        uint32_t hz_frac = hz_centi % 100;
 
-        ESP_LOGI("HW_DIAG",
-                 "RUNTIME_FAST: hz=%u cycles=%u missed=%u worst_us=%u",
-                 hz, cycles, missed, worst);
+        if (hz_frac == 0) {
+            ESP_LOGI("HW_DIAG",
+                     "RUNTIME_FAST: hz=%u report_cycles=%u total_cycles=%llu "
+                     "missed=%u processing_us=%u remaining_us=%u "
+                     "period_avg_us=%u period_max_us=%u",
+                     hz_int, report_cycles,
+                     (unsigned long long)total_cycles,
+                     missed, processing_us, remaining_us,
+                     period_avg_us, period_max_us);
+        } else {
+            ESP_LOGI("HW_DIAG",
+                     "RUNTIME_FAST: hz=%u.%02u report_cycles=%u total_cycles=%llu "
+                     "missed=%u processing_us=%u remaining_us=%u "
+                     "period_avg_us=%u period_max_us=%u",
+                     hz_int, hz_frac, report_cycles,
+                     (unsigned long long)total_cycles,
+                     missed, processing_us, remaining_us,
+                     period_avg_us, period_max_us);
+        }
+
+        /* Reset report window for next interval */
+        runtime_stats_reset_report_window((int64_t)timestamp_us);
     }
 
-    /* ---- WP-B: GNSS UART RX Counters ---- */
+    /* ---- WP-B: GNSS UART RX Counters (no underflow) ---- */
     {
         const transport_uart_t* p_uart = (const transport_uart_t*)diag->primary_uart;
         const gnss_um980_t*     p_gnss = (const gnss_um980_t*)diag->primary_gnss;
@@ -149,7 +210,7 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      "checksum_ok=%u checksum_bad=%u last=%s",
                      p_gnss->bytes_received,
                      p_gnss->sentences_parsed,
-                     p_gnss->sentences_parsed - p_gnss->checksum_errors,
+                     saturated_sub(p_gnss->sentences_parsed, p_gnss->checksum_errors),
                      p_gnss->checksum_errors,
                      last_sentence_type(p_gnss));
         }
@@ -163,7 +224,7 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      "checksum_ok=%u checksum_bad=%u last=%s",
                      s_gnss->bytes_received,
                      s_gnss->sentences_parsed,
-                     s_gnss->sentences_parsed - s_gnss->checksum_errors,
+                     saturated_sub(s_gnss->sentences_parsed, s_gnss->checksum_errors),
                      s_gnss->checksum_errors,
                      last_sentence_type(s_gnss));
         }
@@ -206,17 +267,76 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         }
     }
 
-    /* ---- WP-D: Ethernet/UDP/PGN214 Status ---- */
+    /* ---- WP-A/C: Ethernet/UDP Status (real, no more STUB/fake) ---- */
     {
-        /* Ethernet is currently a stub in hal_eth */
-        ESP_LOGI("HW_DIAG",
-                 "ETH: driver=RTL8201/RMII link=STUB");
+        /* ---- Ethernet: real status from hal_eth ---- */
+        const hal_eth_status_t* eth_st = hal_eth_get_status();
+        bool eth_initialized = (eth_st != NULL && eth_st->initialized);
 
-        /* UDP is currently a stub in transport_udp */
-        ESP_LOGI("HW_DIAG",
-                 "UDP: tx=STUB rx=STUB");
+        if (eth_initialized) {
+            if (eth_st->got_ip) {
+                ESP_LOGI("HW_DIAG",
+                         "ETH: driver=RTL8201/RMII link=%s ip=%u.%u.%u.%u",
+                         eth_st->link_up ? "up" : "down",
+                         eth_st->ip_addr[0], eth_st->ip_addr[1],
+                         eth_st->ip_addr[2], eth_st->ip_addr[3]);
+            } else if (eth_st->link_up) {
+                ESP_LOGI("HW_DIAG",
+                         "ETH: driver=RTL8201/RMII link=up ip=none (DHCP pending)");
+            } else {
+                ESP_LOGI("HW_DIAG",
+                         "ETH: driver=RTL8201/RMII link=down ip=none");
+            }
+        } else {
+            ESP_LOGI("HW_DIAG", "ETH: not_initialized");
+        }
 
-        /* PGN214 TX counter from AOG nav app */
+        /* ---- UDP: real status from transport_udp ---- */
+        const transport_udp_t* udp = (const transport_udp_t*)diag->udp;
+        if (udp != NULL) {
+            const transport_udp_status_t* st = transport_udp_get_status(udp);
+
+            if (st->socket_open && st->bound) {
+                /* WP-C: Socket ready — distinguish from peer presence */
+                uint8_t* ip_bytes = (uint8_t*)&udp->remote_ip;
+                uint32_t peer_seen = (st->rx_packets > 0) ? 1 : 0;
+
+                ESP_LOGI("HW_DIAG",
+                         "UDP: ready rx=ok tx=ok local_port=%u "
+                         "target=%u.%u.%u.%u:%u peer_seen=%u "
+                         "tx_pkts=%u rx_pkts=%u",
+                         (unsigned)udp->local_port,
+                         ip_bytes[3], ip_bytes[2], ip_bytes[1], ip_bytes[0],
+                         (unsigned)udp->remote_port,
+                         peer_seen,
+                         st->tx_packets, st->rx_packets);
+            } else if (eth_initialized && eth_st->got_ip) {
+                /* ETH has IP but socket not yet open — transient state */
+                ESP_LOGI("HW_DIAG",
+                         "UDP: eth_ready waiting_for_socket (has_ip=%u socket_open=%u bound=%u last_err=%d)",
+                         (unsigned)st->has_ip,
+                         (unsigned)st->socket_open,
+                         (unsigned)st->bound,
+                         st->last_error);
+            } else if (eth_initialized && !eth_st->got_ip) {
+                ESP_LOGI("HW_DIAG", "UDP: waiting_for_ip");
+            } else {
+                ESP_LOGI("HW_DIAG", "UDP: waiting_for_eth");
+            }
+        } else {
+            /* No UDP reference wired — fallback to ETH status only */
+            if (eth_initialized && eth_st->got_ip) {
+                ESP_LOGI("HW_DIAG", "UDP: eth_ready (no_udp_ref)");
+            } else if (eth_initialized) {
+                ESP_LOGI("HW_DIAG", "UDP: waiting_for_ip (no_udp_ref)");
+            } else {
+                ESP_LOGI("HW_DIAG", "UDP: waiting_for_eth (no_udp_ref)");
+            }
+        }
+    }
+
+    /* ---- PGN214 TX counter from AOG nav app ---- */
+    {
         const aog_nav_app_t* app = (const aog_nav_app_t*)diag->nav_app;
         if (app != NULL) {
             ESP_LOGI("HW_DIAG",
@@ -230,6 +350,57 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      (app->output_state == AOG_OUTPUT_HEADING_STALE) ? "HDG_STALE" :
                      (app->output_state == AOG_OUTPUT_HEADING_LOST) ? "HDG_LOST" :
                      (app->output_state == AOG_OUTPUT_INIT) ? "INIT" : "OTHER");
+        }
+    }
+
+    /* ---- WP-H: NTRIP Status Diagnostics (no secrets) ---- */
+    {
+        const hal_eth_status_t* eth_st = hal_eth_get_status();
+        bool ntrip_eth = (eth_st != NULL && eth_st->initialized && eth_st->got_ip);
+
+        const ntrip_client_t* ntrip = (const ntrip_client_t*)diag->ntrip;
+        if (ntrip != NULL) {
+            bool config_ready = ntrip->config_valid;
+            ntrip_state_t state = ntrip->state;
+            bool started = ntrip->started;
+
+            /* Determine display state */
+            const char* display_state;
+            const char* reason = "";
+
+            if (!config_ready && !started) {
+                display_state = "disabled";
+                reason = "empty_config";
+            } else if (!ntrip_eth) {
+                display_state = "waiting";
+                reason = "no_eth_ip";
+            } else if (started) {
+                display_state = ntrip_state_str(state);
+                reason = "";
+            } else {
+                display_state = "ready";
+                reason = "";
+            }
+
+            ESP_LOGI("HW_DIAG",
+                     "NTRIP: eth_ready=%u config_ready=%u state=%s%s%s",
+                     (unsigned)ntrip_eth,
+                     (unsigned)config_ready,
+                     display_state,
+                     reason[0] ? " reason=" : "",
+                     reason);
+
+            /* WP-H: Config fields — NEVER log password */
+            ESP_LOGI("HW_DIAG",
+                     "NTRIP_CFG: host=%s port=%u mount=%s user=%s password=%s",
+                     ntrip->config.host[0] ? "set" : "empty",
+                     (unsigned)ntrip->config.port,
+                     ntrip->config.mountpoint[0] ? "set" : "empty",
+                     ntrip->config.username[0] ? "set" : "empty",
+                     ntrip->config.password[0] ? "set" : "empty");
+        } else {
+            ESP_LOGI("HW_DIAG", "NTRIP: eth_ready=%u config_ready=0 state=disabled reason=no_ntrip_ref",
+                     (unsigned)ntrip_eth);
         }
     }
 }

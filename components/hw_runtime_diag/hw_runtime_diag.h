@@ -3,25 +3,28 @@
  * hw_runtime_diag.h — Hardware Runtime Diagnostics (NAV-HW-RUNTIME-DIAG-001)
  *
  * Lightweight diagnostic component that prints periodic health summaries
- * for the fast loop, GNSS UARTs, GNSS snapshots, Ethernet/UDP, and
- * PGN214 TX at 0.2 Hz (every 5 seconds).
+ * for the fast loop, GNSS UARTs, GNSS snapshots, Ethernet/UDP, NTRIP,
+ * and PGN214 TX at 0.2 Hz (every 5 seconds).
  *
  * HARD RULES:
  *   - No changes to GNSS/PGN214/NTRIP/RTCM/Steering logic
  *   - No logging in the 100 Hz fast path
  *   - No blocking operations
  *   - READ-ONLY access to all observed components
+ *   - No NTRIP secrets (passwords, tokens) in log output
  *
  * Output format (example):
- *   RUNTIME_FAST: hz=100 cycles=500 missed=0 worst_us=320
+ *   RUNTIME_FAST: hz=99.8 report_cycles=500 total_cycles=2534 ...
  *   GNSS_RX: primary uart=1 bytes=1234 lines=56 checksum_ok=54 checksum_bad=2
  *   GNSS_RX: secondary uart=2 bytes=0 lines=0 checksum_ok=0 checksum_bad=0
  *   GNSS: primary valid=1 fresh=1 fix=rtk age_ms=120
  *   GNSS: secondary valid=0 fresh=0 fix=none age_ms=0
- *   HEADING: valid=0 fresh=0 heading_deg=0.0 baseline_m=0.0
- *   ETH: driver=RTL8201/RMII link=STUB
- *   UDP: tx=STUB rx=STUB
- *   AOG_NAV: pgn214_tx=500 cycle=500
+ *   HEADING: valid=0 heading_deg=0.0 calc_count=0
+ *   ETH: driver=RTL8201/RMII link=up ip=192.168.1.59
+ *   UDP: ready rx=ok tx=ok local_port=9999 target=255.255.255.255:9999 peer_seen=0
+ *   NTRIP: eth_ready=1 config_ready=0 state=disabled reason=empty_config
+ *   NTRIP_CFG: host=empty port=0 mount=empty user=empty password=empty
+ *   AOG_NAV: pgn214_tx=500 cycle=500 state=OK
  * ======================================================================== */
 
 #include <stdint.h>
@@ -52,6 +55,8 @@ typedef struct {
     const void* secondary_gnss;    /* gnss_um980_t* */
     const void* heading;           /* gnss_dual_heading_calc_t* */
     const void* nav_app;           /* aog_nav_app_t* */
+    const void* udp;               /* transport_udp_t*   (NAV-ETH-BRINGUP-001-R2 WP-B) */
+    const void* ntrip;             /* ntrip_client_t*    (NAV-ETH-BRINGUP-001-R2 WP-H) */
 } hw_runtime_diag_t;
 
 /* Initialize diagnostic component.
@@ -66,7 +71,9 @@ void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
                                   const void* primary_gnss,
                                   const void* secondary_gnss,
                                   const void* heading,
-                                  const void* nav_app);
+                                  const void* nav_app,
+                                  const void* udp,
+                                  const void* ntrip);
 
 /* Service step: called from DIAG service group (Core 0, ~100ms period).
  * Prints health summary every 5 seconds. */

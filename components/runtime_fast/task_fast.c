@@ -34,6 +34,11 @@ static void task_fast(void* arg)
 
     while (1) {
         int64_t cycle_start_us = esp_timer_get_time();
+
+        /* NAV-ETH-BRINGUP-001-R2 WP-E: Record cycle start BEFORE fast hooks
+         * for accurate start-to-start period measurement. */
+        runtime_stats_record_cycle_start(cycle_start_us);
+
         size_t component_count = runtime_component_count();
         size_t i = 0;
 

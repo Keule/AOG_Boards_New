@@ -17,6 +17,7 @@ set(APP_CORE_NAV_REQUIRES
     nav_diagnostics
     hal_eth
     hw_runtime_diag
+    nav_config
 )
 
 set(APP_CORE_STEER_REQUIRES

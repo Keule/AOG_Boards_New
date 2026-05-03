@@ -25,6 +25,7 @@
 #include "nav_diagnostics.h"
 #include "hal_eth.h"
 #include "hw_runtime_diag.h"
+#include "nav_ntrip_config.h"
 #endif
 
 /* ---- Steering subsystem includes ----
@@ -303,6 +304,21 @@ void app_core_init(void)
      * calling it once centrally avoids ambiguity and double-init confusion. */
 #if !defined(UNIT_TEST) && !defined(NATIVE_TEST)
     hal_uart_init(hal_uart_esp32_ops());
+
+    /* ---- Central ESP32 HAL Ethernet init ----
+     * NAV-ETH-BRINGUP-001: Initialize RMII Ethernet driver (RTL8201 PHY).
+     * Must happen BEFORE transport_udp_init() so the IP stack is ready
+     * when UDP sockets are lazily opened in service_step. */
+    {
+        const hal_eth_ops_t* eth_ops = hal_eth_esp32_ops();
+        hal_err_t err = hal_eth_init(eth_ops);
+        if (err == HAL_OK && eth_ops->init) {
+            err = eth_ops->init();
+            if (err != HAL_OK) {
+                ESP_LOGE(TAG, "Ethernet HAL init failed");
+            }
+        }
+    }
 #endif
 
     /* ---- Native test HAL override ----
@@ -355,13 +371,36 @@ void app_core_init(void)
         gnss_dual_heading_set_sources(&s_heading, &s_primary_gnss, &s_secondary_gnss);
 
         /* --- NTRIP client ---
-         * Init, register, and configure — but do NOT start if config is invalid.
-         * Starting with empty host/mountpoint would silently fail.
-         * The client stays in IDLE until a valid config is loaded (e.g. from NVS)
-         * and ntrip_client_start() is called explicitly. */
+         * NAV-ETH-BRINGUP-001-R2 WP-F: Try to load config from local secrets.
+         * If the file components/nav_config/nav_ntrip_secrets.local.h exists
+         * at build time, NTRIP_SECRETS_AVAILABLE is defined and we include it.
+         * Otherwise, NTRIP stays disabled with empty defaults.
+         * Password is NEVER logged. */
         ntrip_client_init(&s_ntrip);
         ntrip_client_set_transport(&s_ntrip, &s_ntrip_tcp);
-        ntrip_client_configure(&s_ntrip, &(ntrip_client_config_t)NTRIP_CLIENT_CONFIG_DEFAULT());
+
+        ntrip_client_config_t ntrip_cfg = NTRIP_CLIENT_CONFIG_DEFAULT();
+
+#ifdef NTRIP_SECRETS_AVAILABLE
+        /* Include local secrets at compile time */
+#include "nav_ntrip_secrets.local.h"
+        /* Override defaults with real values (file must define these macros) */
+        if (NTRIP_HOST[0] != '\0' && NTRIP_MOUNTPOINT[0] != '\0') {
+            strncpy(ntrip_cfg.host, NTRIP_HOST, sizeof(ntrip_cfg.host) - 1);
+            ntrip_cfg.port = NTRIP_PORT;
+            strncpy(ntrip_cfg.mountpoint, NTRIP_MOUNTPOINT, sizeof(ntrip_cfg.mountpoint) - 1);
+            strncpy(ntrip_cfg.username, NTRIP_USER, sizeof(ntrip_cfg.username) - 1);
+            strncpy(ntrip_cfg.password, NTRIP_PASSWORD, sizeof(ntrip_cfg.password) - 1);
+            ESP_LOGI(TAG, "NTRIP: config loaded from local secrets (host=%s, mount=%s)",
+                     NTRIP_HOST, NTRIP_MOUNTPOINT);
+        } else {
+            ESP_LOGW(TAG, "NTRIP: secrets file found but host/mountpoint empty");
+        }
+#else
+        ESP_LOGI(TAG, "NTRIP: no local secrets file — disabled (see nav_ntrip_secrets.example.h)");
+#endif
+
+        ntrip_client_configure(&s_ntrip, &ntrip_cfg);
 
         if (s_ntrip.config_valid) {
             ntrip_client_start(&s_ntrip);
@@ -483,13 +522,18 @@ void app_core_init(void)
 
         /* --- NAV-HW-RUNTIME-DIAG-001: Hardware runtime diagnostics --- */
         hw_runtime_diag_init(&s_hw_diag);
+        /* NAV-ETH-BRINGUP-001-R2 WP-B: Pass real UDP and NTRIP references.
+         * Previous code only passed nav_app and cast it to transport_udp_t
+         * (WRONG — nav_app is aog_nav_app_t, not transport_udp_t). */
         hw_runtime_diag_set_sources(&s_hw_diag,
                                      &s_primary_uart,
                                      &s_secondary_uart,
                                      &s_primary_gnss,
                                      &s_secondary_gnss,
                                      &s_heading,
-                                     &s_nav_app);
+                                     &s_nav_app,
+                                     &s_aog_udp,
+                                     &s_ntrip);
         s_hw_diag.component.service_group = SERVICE_GROUP_DIAGNOSTICS;
         runtime_component_register(&s_hw_diag.component);
 
