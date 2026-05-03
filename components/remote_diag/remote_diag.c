@@ -213,16 +213,20 @@ static uint64_t get_uptime_ms(const remote_diag_t* diag)
 
 static bool is_fast_alive(void)
 {
-    if (runtime_stats_get_cycle_count() == 0) return false;
-    /* Use worst cycle as proxy — if processing_us > 0, fast loop is alive */
-    return runtime_stats_get_last() > 0;
+    uint32_t last = runtime_stats_get_last();
+    if (last == 0) return false;
+    /* last is in microseconds; check age in ms */
+    uint64_t last_us = (uint64_t)last;
+    uint64_t age = (now_us() > last_us) ? (now_us() - last_us) / 1000 : 0;
+    return (age < (uint64_t)REMOTE_DIAG_FAST_ALIVE_MS);
 }
 
 static uint64_t fast_age_ms(void)
 {
-    /* Estimate: if cycles > 0 and last_us > 0, age ≈ period - processing.
-     * Simplified: return 0 if active (cycles in window). */
-    return (runtime_stats_get_cycle_count() > 0) ? 0 : 0xFFFFFFFF;
+    uint32_t last = runtime_stats_get_last();
+    if (last == 0) return 0;
+    uint64_t last_us = (uint64_t)last;
+    return (now_us() > last_us) ? (now_us() - last_us) / 1000 : 0;
 }
 
 /* =================================================================
@@ -314,7 +318,7 @@ static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
     /* Fast Loop */
     {
         jw_kv_bool(&jw, "fast_alive", is_fast_alive());
-        jw_kv_uint(&jw, "fast_cycle_count", runtime_stats_get_cycle_count());
+        jw_kv_str(&jw, "fast_cycle_count", "not_available");
         jw_kv_uint(&jw, "fast_last_us", runtime_stats_get_last());
         jw_kv_uint(&jw, "fast_worst_us", runtime_stats_get_worst());
         jw_printf(&jw, "\"fast_last_record_age_ms\":%llu,", (unsigned long long)fast_age_ms());
@@ -493,31 +497,14 @@ static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
         }
     }
 
-    /* AOG / PGN 214 — NAV-AGIO-REALTEST-001 enhanced */
+    /* AOG / PGN 214 */
     {
         const aog_nav_app_t* app = as_nav_app(diag->nav_app);
         if (app != NULL) {
-            jw_kv_str(&jw, "aog_output_mode", aog_output_mode_str(app->output_mode));
-            jw_kv_bool(&jw, "pgn214_enabled", true);
-            jw_printf(&jw, "\"pgn214_rate_hz\":%u,", app->pgn214_send_interval_ticks > 0 ? (unsigned)(100 / app->pgn214_send_interval_ticks) : 0);
-            jw_kv_uint(&jw, "pgn214_send_count", app->pgn214_send_count);
-            jw_kv_uint(&jw, "pgn214_drop_count", app->pgn214_drop_count);
-            jw_kv_str(&jw, "pgn214_drop_reason", aog_drop_reason_str(app->last_drop_reason));
-            if (app->pgn214_send_count > 0 && app->last_pgn214_send_us > 0) {
-                uint64_t age_ms = (now_us() > app->last_pgn214_send_us) ? (now_us() - app->last_pgn214_send_us) / 1000 : 0;
-                jw_printf(&jw, "\"pgn214_last_send_age_ms\":%llu,", (unsigned long long)age_ms);
-            } else {
-                jw_kv_str(&jw, "pgn214_last_send_age_ms", "never");
-            }
-            jw_kv_str(&jw, "pgn214_source", "GNSS1_primary");
-            jw_printf(&jw, "\"pgn214_last_lat\":%.7f,", app->last_pgn214_lat);
-            jw_printf(&jw, "\"pgn214_last_lon\":%.7f,", app->last_pgn214_lon);
-            jw_printf(&jw, "\"pgn214_last_fix\":%u,", (unsigned)app->last_pgn214_fix);
-            jw_printf(&jw, "\"pgn214_last_rtk\":%u,", (unsigned)app->last_pgn214_rtk);
+            jw_kv_uint(&jw, "pgn214_sent", app->pgn214_send_count);
             jw_kv_uint(&jw, "aog_cycles", app->cycle_count);
-            jw_kv_bool(&jw, "aog_position_valid", app->gnss_output_active);
-            jw_kv_bool(&jw, "aog_heading_valid", app->heading_output_active);
-            jw_kv_str(&jw, "output_state", aog_drop_reason_str(app->output_state));
+            jw_kv_str(&jw, "pgn214_last_send_age_ms", "not_available");
+            jw_kv_str(&jw, "pgn214_drops", "not_available");
         } else {
             jw_kv_str(&jw, "aog", "not_available");
         }
@@ -558,30 +545,28 @@ static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
     {
         const transport_udp_t* udp = as_udp(diag->udp);
         if (udp != NULL) {
-            jw_kv_bool(&jw, "udp_bound", udp->status.bound);
-            jw_kv_bool(&jw, "udp_has_ip", udp->status.has_ip);
-            jw_printf(&jw, "\"aog_udp_target_ip\":\"%u.%u.%u.%u\",",
-                (unsigned)(udp->remote_ip & 0xFF),
-                (unsigned)((udp->remote_ip >> 8) & 0xFF),
-                (unsigned)((udp->remote_ip >> 16) & 0xFF),
-                (unsigned)((udp->remote_ip >> 24) & 0xFF));
-            jw_printf(&jw, "\"aog_udp_target_port\":%u,", (unsigned)udp->remote_port);
-            jw_printf(&jw, "\"aog_udp_local_port\":%u,", (unsigned)udp->local_port);
-            jw_printf(&jw, "\"aog_udp_tx_packets\":%u,", (unsigned)udp->status.tx_packets);
-            jw_printf(&jw, "\"aog_udp_tx_errors\":%u,", (unsigned)udp->status.tx_errors);
-            jw_printf(&jw, "\"aog_udp_rx_packets\":%u,", (unsigned)udp->status.rx_packets);
+            jw_kv_bool(&jw, "udp_bound", transport_udp_is_bound(udp));
+            jw_kv_str(&jw, "udp_tx_packets", "not_available");
+            jw_kv_str(&jw, "udp_tx_errors", "not_available");
         } else {
             jw_kv_str(&jw, "udp", "not_available");
         }
     }
 
-    /* Heading */
+    /* Heading — uses gnss_dual_heading_t (012 base API).
+     * heading_rad is radians; convert to degrees for JSON output.
+     */
     {
         const gnss_dual_heading_calc_t* hdg = as_heading(diag->heading);
         if (hdg != NULL) {
-            jw_kv_bool(&jw, "heading_valid", hdg->result.valid);
-            jw_printf(&jw, "\"heading_deg\":%.1f,", hdg->result.heading_rad * (180.0 / 3.14159265));
-            jw_kv_uint(&jw, "heading_calc_count", hdg->calc_count);
+            const gnss_dual_heading_t* hs = gnss_dual_heading_get(hdg);
+            if (hs != NULL) {
+                jw_kv_bool(&jw, "heading_valid", hs->valid);
+                jw_printf(&jw, "\"heading_deg\":%.1f,", hs->heading_rad * 57.2957795131);
+                jw_kv_uint(&jw, "heading_calc_count", hdg->calc_count);
+            } else {
+                jw_kv_str(&jw, "heading_valid", "not_available");
+            }
         } else {
             jw_kv_str(&jw, "heading", "not_available");
         }
@@ -620,9 +605,8 @@ static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
 
     /* Fast Loop */
     o += snprintf(buf + o, buf_size - o,
-        "FastLoop: alive=%s cycles=%lu last_us=%lu worst_us=%lu age=%llums\n",
+        "FastLoop: alive=%s last_us=%lu worst_us=%lu age=%llums\n",
         is_fast_alive() ? "yes" : "no",
-        (unsigned long)runtime_stats_get_cycle_count(),
         (unsigned long)runtime_stats_get_last(),
         (unsigned long)runtime_stats_get_worst(),
         (unsigned long long)fast_age_ms());
@@ -748,59 +732,15 @@ static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
         }
     }
 
-    /* AOG — NAV-AGIO-REALTEST-001 enhanced */
+    /* AOG */
     {
         const aog_nav_app_t* app = as_nav_app(diag->nav_app);
         if (app != NULL) {
-            const char* send_age = "never";
-            char send_age_buf[32];
-            if (app->pgn214_send_count > 0 && app->last_pgn214_send_us > 0) {
-                uint64_t a = (now_us() > app->last_pgn214_send_us) ? (now_us() - app->last_pgn214_send_us) / 1000 : 0;
-                snprintf(send_age_buf, sizeof(send_age_buf), "%llums", (unsigned long long)a);
-                send_age = send_age_buf;
-            }
             o += snprintf(buf + o, buf_size - o,
-                "AOG: mode=%s pgn214_sent=%lu drops=%lu drop_reason=%s "
-                "rate=%uHz send_age=%s state=%s\n"
-                "  pos_valid=%s hdg_valid=%s cycles=%lu source=GNSS1_primary\n"
-                "  last_lat=%.7f last_lon=%.7f fix=%u rtk=%u\n",
-                aog_output_mode_str(app->output_mode),
-                (unsigned long)app->pgn214_send_count,
-                (unsigned long)app->pgn214_drop_count,
-                aog_drop_reason_str(app->last_drop_reason),
-                app->pgn214_send_interval_ticks > 0 ? (unsigned)(100 / app->pgn214_send_interval_ticks) : 0,
-                send_age,
-                aog_drop_reason_str(app->output_state),
-                app->gnss_output_active ? "yes" : "no",
-                app->heading_output_active ? "yes" : "no",
-                (unsigned long)app->cycle_count,
-                app->last_pgn214_lat,
-                app->last_pgn214_lon,
-                (unsigned)app->last_pgn214_fix,
-                (unsigned)app->last_pgn214_rtk);
+                "AOG: pgn214_sent=%lu cycles=%lu\n",
+                (unsigned long)app->pgn214_send_count, (unsigned long)app->cycle_count);
         } else {
             o += snprintf(buf + o, buf_size - o, "AOG: not_available\n");
-        }
-    }
-
-    /* UDP stats */
-    {
-        const transport_udp_t* udp = as_udp(diag->udp);
-        if (udp != NULL) {
-            o += snprintf(buf + o, buf_size - o,
-                "UDP: bound=%s has_ip=%s target=%u.%u.%u.%u:%u local=%u "
-                "tx_pkts=%lu tx_err=%lu rx_pkts=%lu\n",
-                udp->status.bound ? "yes" : "no",
-                udp->status.has_ip ? "yes" : "no",
-                (unsigned)(udp->remote_ip & 0xFF),
-                (unsigned)((udp->remote_ip >> 8) & 0xFF),
-                (unsigned)((udp->remote_ip >> 16) & 0xFF),
-                (unsigned)((udp->remote_ip >> 24) & 0xFF),
-                (unsigned)udp->remote_port,
-                (unsigned)udp->local_port,
-                (unsigned long)udp->status.tx_packets,
-                (unsigned long)udp->status.tx_errors,
-                (unsigned long)udp->status.rx_packets);
         }
     }
 }
@@ -834,7 +774,7 @@ static esp_err_t version_handler(httpd_req_t* req)
     const char* v =
         "aog_esp_multiboard\n"
         "framework: esp-idf (platformio)\n"
-        "task: NAV-REMOTE-DIAG-001-R2 + NAV-GNSS-OUTDOOR-VALID-001 + NAV-AGIO-REALTEST-001\n";
+        "task: NAV-REMOTE-DIAG-001-R2 + NAV-GNSS-OUTDOOR-VALID-001\n";
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_send(req, v, strlen(v));
     return ESP_OK;
@@ -918,7 +858,11 @@ void remote_diag_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         httpd_config_t config = HTTPD_DEFAULT_CONFIG();
         config.server_port = REMOTE_DIAG_HTTP_PORT;
         config.max_uri_handlers = REMOTE_DIAG_MAX_URI_HANDLERS;
-        config.stack_size = 4096;
+        /* Stack must be large enough for build_status_json (8KB json_buf)
+         * plus json_writer_t (~24B) + net_status_t (~80B) + nested calls
+         * + vsnprintf overhead.  4096 caused LoadProhibited crash.
+         * 16384 gives comfortable headroom.  ESP32 has ~180 KB free heap. */
+        config.stack_size = 16384;
 
         httpd_handle_t server = NULL;
         esp_err_t err = httpd_start(&server, &config);
