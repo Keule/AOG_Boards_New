@@ -59,9 +59,16 @@ typedef enum {
 #define BOARD_FEATURE_UART_GNSS   (1 << 1)
 #define BOARD_FEATURE_SPI_DEVICE  (1 << 2)
 
-/* ---- GNSS UART Baudrate ---- */
-
+/* ---- GNSS UART Baudrate ----
+ * Default: 921600 (production).
+ * For field testing with reduced bandwidth: define GNSS_UART_BAUD_OVERRIDE
+ * before including this header or via build flag -DGNSS_UART_BAUD_OVERRIDE=460800.
+ * This allows quick testing whether errors correlate with baud rate. */
+#ifndef GNSS_UART_BAUD_OVERRIDE
 #define BOARD_GNSS_UART_BAUDRATE  921600
+#else
+#define BOARD_GNSS_UART_BAUDRATE  GNSS_UART_BAUD_OVERRIDE
+#endif
 
 /* ================================================================
  * PIN DEFINITIONS — LilyGO T-ETH-Lite ESP32 (NAV)
@@ -79,7 +86,10 @@ typedef enum {
 #define BOARD_GNSS_UART1_TX_PIN   2    /* UM980 #1 RTCM RXIN ← ESP32 TX */
 #define BOARD_GNSS_UART1_RX_PIN   4    /* UM980 #1 NMEA TX → ESP32 RX   */
 #define BOARD_GNSS_UART2_TX_PIN   33   /* UM980 #2 RTCM RXIN ← ESP32 TX */
-#define BOARD_GNSS_UART2_RX_PIN   35   /* UM980 #2 NMEA TX → ESP32 RX   */
+#define BOARD_GNSS_UART2_RX_PIN   34   /* UM980 #2 NMEA TX → ESP32 RX   */
+/* NOTE: GPIO34 was previously SD_MISO (BOARD_SD_MISO_PIN).
+ * SD is not used in NAV profile (no driver init).
+ * GPIO34 is input-only — correct for UART RX. */
 
 /* ---- Ethernet RMII Pins (classic ESP32, RTL8201) ---- */
 

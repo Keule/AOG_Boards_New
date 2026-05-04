@@ -168,13 +168,14 @@ bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins
          * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h
          *
          * UART_NUM_2: TX=GPIO33 (ESP32 TX → UM980 #2 RTCM RXIN)
-         *            RX=GPIO35 (UM980 #2 NMEA TX → ESP32 RX)
+         *            RX=GPIO34 (UM980 #2 NMEA TX → ESP32 RX)
          *
          * GPIO33 is output-capable (NOT in input-only range 34..39). OK for TX.
-         * GPIO35 is input-only (in range 34..39). OK for RX (input only needed).
-         * Sanity: GPIO35 is NOT used as TX — hard rule satisfied. */
+         * GPIO34 is input-only (in range 34..39). OK for RX (input only needed).
+         * NOTE: GPIO34 was previously SD_MISO. SD is not used in NAV profile.
+         * NOTE: GPIO35 (previous GNSS2 RX) removed due to observed UART instability. */
         pins->tx_pin = BOARD_GNSS_UART2_TX_PIN;  /* 33 */
-        pins->rx_pin = BOARD_GNSS_UART2_RX_PIN;  /* 35 */
+        pins->rx_pin = BOARD_GNSS_UART2_RX_PIN;  /* 34 */
 #elif defined(CONFIG_BOARD_ESP32S3)
         /* UART_NUM_2: RX=GPIO5 (UM980 #2 NMEA TX → ESP32-S3 RX)
          *            TX=GPIO7 (ESP32-S3 TX → UM980 #2 RTCM RXIN)
@@ -239,12 +240,14 @@ bool board_profile_get_sd_pins(board_sd_pins_t* pins)
 
 #if defined(CONFIG_BOARD_ESP32)
     /* LilyGO T-ETH-Lite ESP32 — SD Card (SPI mode)
-     * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h */
-    pins->miso_pin = BOARD_SD_MISO_PIN;
-    pins->mosi_pin = BOARD_SD_MOSI_PIN;
-    pins->sclk_pin = BOARD_SD_SCLK_PIN;
-    pins->cs_pin   = BOARD_SD_CS_PIN;
-    return true;
+     * DISABLED in NAV profile: GPIO34 (was SD_MISO) reassigned to GNSS2 RX.
+     * SD driver is not initialized anywhere in this firmware.
+     * Returning false prevents accidental SD GPIO conflict. */
+    pins->miso_pin = -1;
+    pins->mosi_pin = -1;
+    pins->sclk_pin = -1;
+    pins->cs_pin   = -1;
+    return false;
 #else
     pins->miso_pin = -1;
     pins->mosi_pin = -1;

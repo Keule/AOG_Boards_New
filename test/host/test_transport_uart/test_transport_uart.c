@@ -256,17 +256,17 @@ void test_rx_overflow_is_tracked(void)
     transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
     transport_uart_init(&uart, &cfg);
 
-    /* Fill the 1024-byte RX buffer in multiple service steps */
-    /* Each service step reads up to 128 bytes from HAL */
-    for (int step = 0; step < 8; step++) {
+    /* Fill the 4096-byte RX buffer in multiple service steps */
+    /* Each service step reads up to 128 bytes from HAL (BURST_SIZE) */
+    for (int step = 0; step < 32; step++) {
         transport_uart_service_step((runtime_component_t*)&uart, (uint64_t)(step + 1) * 1000);
     }
 
-    /* RX buffer should be full (1024 bytes) */
-    TEST_ASSERT_EQUAL(1024, transport_uart_rx_available(&uart));
+    /* RX buffer should be full (4096 bytes) */
+    TEST_ASSERT_EQUAL(4096, transport_uart_rx_available(&uart));
 
     /* One more service step — HAL provides more data but buffer is full */
-    transport_uart_service_step((runtime_component_t*)&uart, 9000);
+    transport_uart_service_step((runtime_component_t*)&uart, 33000);
 
     /* Overflow counter should have incremented */
     const transport_uart_stats_t* stats = transport_uart_get_stats(&uart);
@@ -278,15 +278,15 @@ void test_rx_overflow_visible_in_diagnostics(void)
     transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
     transport_uart_init(&uart, &cfg);
 
-    /* Fill RX buffer (8 steps of 128 bytes) + 1 overflow step */
-    for (int step = 0; step < 9; step++) {
+    /* Fill RX buffer (32 steps of 128 bytes) + 1 overflow step */
+    for (int step = 0; step < 33; step++) {
         transport_uart_service_step((runtime_component_t*)&uart, (uint64_t)(step + 1) * 1000);
     }
 
     transport_uart_diagnostics_t diag;
     hal_err_t err = transport_uart_diagnostics(&uart, &diag);
     TEST_ASSERT_EQUAL(HAL_OK, err);
-    TEST_ASSERT_EQUAL(1024, diag.rx_buffer_size);
+    TEST_ASSERT_EQUAL(4096, diag.rx_buffer_size);
     TEST_ASSERT_TRUE(diag.rx_overflow_total > 0);
     TEST_ASSERT_EQUAL(diag.rx_overflow_total, diag.stats.rx_overflow_count);
 }
@@ -366,8 +366,8 @@ void test_diagnostics_returns_valid_data(void)
     transport_uart_diagnostics_t diag;
     hal_err_t err = transport_uart_diagnostics(&uart, &diag);
     TEST_ASSERT_EQUAL(HAL_OK, err);
-    TEST_ASSERT_EQUAL(1024, diag.rx_buffer_size);
-    TEST_ASSERT_EQUAL(512, diag.tx_buffer_size);
+    TEST_ASSERT_EQUAL(4096, diag.rx_buffer_size);
+    TEST_ASSERT_EQUAL(1024, diag.tx_buffer_size);
 }
 
 void test_diagnostics_null_returns_error(void)
@@ -395,13 +395,13 @@ void test_tx_free_returns_remaining_space(void)
     transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
     transport_uart_init(&uart, &cfg);
 
-    TEST_ASSERT_EQUAL(512, transport_uart_tx_free(&uart));
+    TEST_ASSERT_EQUAL(1024, transport_uart_tx_free(&uart));
 
     uint8_t data[100];
     memset(data, 0, sizeof(data));
     transport_uart_tx_write(&uart, data, 100);
 
-    TEST_ASSERT_EQUAL(412, transport_uart_tx_free(&uart));
+    TEST_ASSERT_EQUAL(924, transport_uart_tx_free(&uart));
 }
 
 void test_rx_available_null_returns_zero(void)
@@ -472,7 +472,7 @@ void test_tx_overflows_tracked_when_buffer_full(void)
     transport_uart_config_t cfg = { .port = BOARD_UART_CONSOLE, .baudrate = 115200 };
     transport_uart_init(&uart, &cfg);
 
-    /* TX buffer is 512 bytes. Write more than that. */
+    /* TX buffer is 1024 bytes. Write more than that. */
     uint8_t data[256];
     memset(data, 0xBB, sizeof(data));
 
@@ -486,17 +486,27 @@ void test_tx_overflows_tracked_when_buffer_full(void)
     TEST_ASSERT_EQUAL(256, written2);
     TEST_ASSERT_EQUAL(0, transport_uart_get_stats(&uart)->tx_overflows);
 
-    /* Third write: buffer now full — all overflow */
-    size_t written3 = transport_uart_tx_write(&uart, data, 10);
-    TEST_ASSERT_EQUAL(0, written3);
+    /* Third write: 256 more bytes — 256 fit (total 768) */
+    size_t written3 = transport_uart_tx_write(&uart, data, 256);
+    TEST_ASSERT_EQUAL(256, written3);
+    TEST_ASSERT_EQUAL(0, transport_uart_get_stats(&uart)->tx_overflows);
+
+    /* Fourth write: 256 more bytes — 256 fit (total 1024, buffer full) */
+    size_t written4 = transport_uart_tx_write(&uart, data, 256);
+    TEST_ASSERT_EQUAL(256, written4);
+    TEST_ASSERT_EQUAL(0, transport_uart_get_stats(&uart)->tx_overflows);
+
+    /* Fifth write: buffer now full — all overflow */
+    size_t written5 = transport_uart_tx_write(&uart, data, 10);
+    TEST_ASSERT_EQUAL(0, written5);
     TEST_ASSERT_TRUE(transport_uart_get_stats(&uart)->tx_overflows > 0);
 
     /* Drain buffer via service step */
     transport_uart_service_step((runtime_component_t*)&uart, 1000);
 
     /* Write again: fits, no new overflow */
-    size_t written4 = transport_uart_tx_write(&uart, data, 100);
-    TEST_ASSERT_EQUAL(100, written4);
+    size_t written6 = transport_uart_tx_write(&uart, data, 100);
+    TEST_ASSERT_EQUAL(100, written6);
 }
 
 void test_stats_include_new_fields_initially_zero(void)

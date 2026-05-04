@@ -11,9 +11,9 @@
  *
  * Pin matrix matches Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h:
  *   GNSS1: TX=GPIO2, RX=GPIO4
- *   GNSS2: TX=GPIO33, RX=GPIO35
+ *   GNSS2: TX=GPIO33, RX=GPIO34
  *   ETH:   RTL8201/RMII, MDC=23, MDIO=18, POWER=12
- *   SD:    MISO=34, MOSI=13, SCLK=14, CS=5
+ *   SD:    disabled (GPIO34 reassigned to GNSS2 RX)
  *   MISC:  SAFETY_IN=15, LOG_SWITCH=0 */
 #include <stddef.h>
 #include "board_profile.h"
@@ -69,10 +69,10 @@ bool board_profile_get_uart_pins(board_uart_port_t port, board_uart_pins_t* pins
         pins->rx_pin = BOARD_GNSS_UART1_RX_PIN;  /* 4 */
         return true;
     case BOARD_UART_GNSS_SECONDARY:
-        /* Matching productive board: UART_NUM_2 TX=GPIO33, RX=GPIO35
-         * Source: Keule/ESP32_AGO_GNSS LILYGO_T_ETH_LITE_ESP32_board_pins.h */
+        /* Matching productive board: UART_NUM_2 TX=GPIO33, RX=GPIO34
+         * NOTE: GPIO35 removed (unstable), GPIO34 was previously SD_MISO */
         pins->tx_pin = BOARD_GNSS_UART2_TX_PIN;  /* 33 */
-        pins->rx_pin = BOARD_GNSS_UART2_RX_PIN;  /* 35 */
+        pins->rx_pin = BOARD_GNSS_UART2_RX_PIN;  /* 34 */
         return true;
     default:
         pins->tx_pin = -1;
@@ -114,12 +114,12 @@ bool board_profile_get_sd_pins(board_sd_pins_t* pins)
     if (pins == NULL) {
         return false;
     }
-    /* Mock matches productive ESP32 NAV: SD card SPI pins */
-    pins->miso_pin = BOARD_SD_MISO_PIN;
-    pins->mosi_pin = BOARD_SD_MOSI_PIN;
-    pins->sclk_pin = BOARD_SD_SCLK_PIN;
-    pins->cs_pin   = BOARD_SD_CS_PIN;
-    return true;
+    /* SD disabled: GPIO34 reassigned to GNSS2 RX, SD driver never initialized */
+    pins->miso_pin = -1;
+    pins->mosi_pin = -1;
+    pins->sclk_pin = -1;
+    pins->cs_pin   = -1;
+    return false;
 }
 
 bool board_profile_get_misc_pins(board_misc_pins_t* pins)

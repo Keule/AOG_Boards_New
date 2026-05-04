@@ -7,10 +7,10 @@
  *
  * Expected for current NAV-BOARD-PINS-001 state:
  *   - GNSS_PRIMARY: TX=GPIO2, RX=GPIO4 (Keule reference)
- *   - GNSS_SECONDARY: TX=GPIO33, RX=GPIO35 (Keule reference)
+ *   - GNSS_SECONDARY: TX=GPIO33, RX=GPIO34 (GPIO35 removed, unstable)
  *   - Both have UART TX capability (has_uart_tx == true)
  *   - ETH RMII pins: MDC=23, MDIO=18, POWER=12
- *   - SD pins: MISO=34, MOSI=13, SCLK=14, CS=5
+ *   - SD: disabled (GPIO34 reassigned to GNSS2 RX)
  *   - Misc: SAFETY_IN=15, LOG_SWITCH=0
  *   - GNSS port iteration table contains both
  * ======================================================================== */
@@ -82,7 +82,7 @@ void test_gnss_secondary_pins_match_keule_reference(void)
     bool ok = board_profile_get_uart_pins(BOARD_UART_GNSS_SECONDARY, &pins);
     TEST_ASSERT_TRUE(ok);
     TEST_ASSERT_EQUAL(BOARD_GNSS_UART2_TX_PIN, pins.tx_pin);  /* 33 */
-    TEST_ASSERT_EQUAL(BOARD_GNSS_UART2_RX_PIN, pins.rx_pin);  /* 35 */
+    TEST_ASSERT_EQUAL(BOARD_GNSS_UART2_RX_PIN, pins.rx_pin);  /* 34 */
 }
 
 void test_gnss_tx_pins_not_input_only(void)
@@ -120,17 +120,19 @@ void test_eth_rmii_pins_available(void)
     TEST_ASSERT_EQUAL(BOARD_ETH_RESET_PIN, pins.reset_pin);
 }
 
-/* ---- SD pin verification ---- */
+/* ---- SD pin verification ----
+ * SD is disabled: GPIO34 was reassigned to GNSS2 RX (Task 021-a).
+ * board_profile_get_sd_pins() returns false with all pins set to -1. */
 
-void test_sd_pins_available(void)
+void test_sd_pins_disabled(void)
 {
     board_sd_pins_t pins;
     bool ok = board_profile_get_sd_pins(&pins);
-    TEST_ASSERT_TRUE(ok);
-    TEST_ASSERT_EQUAL(BOARD_SD_MISO_PIN, pins.miso_pin);
-    TEST_ASSERT_EQUAL(BOARD_SD_MOSI_PIN, pins.mosi_pin);
-    TEST_ASSERT_EQUAL(BOARD_SD_SCLK_PIN, pins.sclk_pin);
-    TEST_ASSERT_EQUAL(BOARD_SD_CS_PIN, pins.cs_pin);
+    TEST_ASSERT_FALSE(ok);
+    TEST_ASSERT_EQUAL(-1, pins.miso_pin);
+    TEST_ASSERT_EQUAL(-1, pins.mosi_pin);
+    TEST_ASSERT_EQUAL(-1, pins.sclk_pin);
+    TEST_ASSERT_EQUAL(-1, pins.cs_pin);
 }
 
 /* ---- Misc pin verification ---- */
@@ -262,8 +264,8 @@ int main(void)
     /* ETH RMII */
     RUN_TEST(test_eth_rmii_pins_available);
 
-    /* SD Card */
-    RUN_TEST(test_sd_pins_available);
+    /* SD Card (disabled) */
+    RUN_TEST(test_sd_pins_disabled);
 
     /* Misc */
     RUN_TEST(test_misc_pins_available);

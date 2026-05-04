@@ -14,8 +14,8 @@ extern "C" {
 
 /* ---- Transport UART Config ---- */
 
-#define TRANSPORT_UART_RX_BUFFER_SIZE  1024
-#define TRANSPORT_UART_TX_BUFFER_SIZE  512
+#define TRANSPORT_UART_RX_BUFFER_SIZE  4096   /* Was 1024. GNSS at 921600 baud generates ~12KB/s */
+#define TRANSPORT_UART_TX_BUFFER_SIZE  1024   /* Was 512. RTCM output can burst. */
 #define TRANSPORT_UART_BURST_SIZE      128
 
 typedef struct {
@@ -28,6 +28,11 @@ typedef struct {
 typedef struct {
     uint32_t rx_bytes_in;        /* Total bytes read from HAL into RX buffer     */
     uint32_t rx_overflow_count;  /* RX ring buffer overflow counter               */
+    uint32_t rx_ring_stat_errors;/* Count of times rx_buffer_used > capacity detected */
+    uint32_t rx_bytes_in_prev;   /* Previous snapshot for delta calculation       */
+    uint32_t rx_overflow_count_prev; /* Previous overflow snapshot                 */
+    uint32_t rx_bytes_per_s;     /* Calculated RX throughput (bytes/s)            */
+    uint32_t rx_overruns_per_s;  /* Calculated RX overflow rate (events/s)        */
     uint32_t tx_bytes_out;       /* Total bytes written from TX buffer to HAL     */
     uint32_t tx_partial_writes;  /* Number of times HAL wrote fewer bytes than
                                     requested (backpressure event)               */
@@ -81,6 +86,7 @@ typedef struct {
 
     /* Statistics */
     transport_uart_stats_t stats;
+    uint64_t last_rate_update_us;  /* Timestamp of last rate computation */
 } transport_uart_t;
 
 /* ---- API ---- */
@@ -131,6 +137,12 @@ void transport_uart_pump(transport_uart_t* uart);
 
 /* Fill diagnostics struct. Returns HAL_OK on success. */
 hal_err_t transport_uart_diagnostics(const transport_uart_t* uart, transport_uart_diagnostics_t* diag);
+
+/* Thread-safe clamped ring buffer occupancy (0..capacity).
+ * Returns rx_buffer.size clamped to [0, capacity].
+ * Increments rx_ring_stat_errors if corruption detected.
+ * Safe to call from any thread/context (uses spinlock internally). */
+uint32_t transport_uart_rx_ring_used(const transport_uart_t* uart);
 
 #ifdef __cplusplus
 }

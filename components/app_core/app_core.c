@@ -135,11 +135,18 @@ static bool board_pin_sanity_check(void)
             ok = false;
         }
 
-        /* Hard rule: GPIO35 must NOT be TX */
+        /* Hard rule: GPIO35 must NOT be TX (input-only, also known to be unreliable as RX) */
         if (pins.tx_pin == 35) {
             ESP_LOGE("BOARD_PIN",
                      "%s UART TX=GPIO35 violates hard rule (GPIO35 is input-only on classic ESP32)",
                      uart_names[i]);
+            ok = false;
+        }
+
+        /* Verify GNSS2 RX has been moved away from GPIO35 (unstable RX path) */
+        if (port == BOARD_UART_GNSS_SECONDARY && pins.rx_pin == 35) {
+            ESP_LOGE("BOARD_PIN",
+                     "GNSS2 UART RX=GPIO35 — known unstable RX path. Must use GPIO34 or other input-only pin.");
             ok = false;
         }
     }
@@ -216,6 +223,8 @@ static void board_pin_boot_log(void)
         ESP_LOGI(TAG, "BOARD: sd miso=%d mosi=%d sclk=%d cs=%d",
                  sd_pins.miso_pin, sd_pins.mosi_pin,
                  sd_pins.sclk_pin, sd_pins.cs_pin);
+    } else {
+        ESP_LOGI(TAG, "BOARD: sd disabled (GPIO34 reassigned to GNSS2 RX)");
     }
 
     /* ---- Line 6: Misc ---- */

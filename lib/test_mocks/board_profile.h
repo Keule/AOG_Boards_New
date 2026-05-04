@@ -61,7 +61,11 @@ typedef enum {
 
 /* ---- GNSS UART Baudrate ---- */
 
+#ifndef GNSS_UART_BAUD_OVERRIDE
 #define BOARD_GNSS_UART_BAUDRATE  921600
+#else
+#define BOARD_GNSS_UART_BAUDRATE  GNSS_UART_BAUD_OVERRIDE
+#endif
 
 /* ================================================================
  * PIN DEFINITIONS — LilyGO T-ETH-Lite ESP32 (NAV)
@@ -79,7 +83,9 @@ typedef enum {
 #define BOARD_GNSS_UART1_TX_PIN   2    /* UM980 #1 RTCM RXIN ← ESP32 TX */
 #define BOARD_GNSS_UART1_RX_PIN   4    /* UM980 #1 NMEA TX → ESP32 RX   */
 #define BOARD_GNSS_UART2_TX_PIN   33   /* UM980 #2 RTCM RXIN ← ESP32 TX */
-#define BOARD_GNSS_UART2_RX_PIN   35   /* UM980 #2 NMEA TX → ESP32 RX   */
+#define BOARD_GNSS_UART2_RX_PIN   34   /* UM980 #2 NMEA TX → ESP32 RX   */
+/* NOTE: GPIO34 was previously SD_MISO (BOARD_SD_MISO_PIN).
+ * GPIO35 removed due to observed UART instability. */
 
 /* ---- Ethernet RMII Pins (classic ESP32, RTL8201) ---- */
 

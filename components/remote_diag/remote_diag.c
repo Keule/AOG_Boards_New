@@ -74,6 +74,11 @@ static const char* TAG = "REMOTE_DIAG";
 /* ---- Buffer sizes ---- */
 #define JSON_BUF_SIZE  8192
 #define DIAG_BUF_SIZE  8192
+#define GNSS_CMD_TEXT_BUF_SIZE  (GNSS_CTRL_MAX_RESPONSE * 5)  /* 20480 */
+#define GNSS_CMD_JSON_BUF_SIZE  12288
+#define GNSS_CMD_ESC_BUF_SIZE   (GNSS_CTRL_MAX_RESPONSE * 2)  /* 8192 */
+#define HTTPD_STACK_SIZE        24576  /* Must exceed worst-case handler stack usage */
+#define LOG_CHUNK_SIZE          2048  /* Chunk size for /logs/view streaming */
 
 /* ---- Helpers: safe pointer deref ---- */
 
@@ -529,20 +534,52 @@ static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
         }
     }
 
-    /* UART stats per receiver */
+    /* UART stats per receiver — extended with pin, buffer, rates */
     {
         const transport_uart_t* uarts[2] = { as_uart(diag->primary_uart), as_uart(diag->secondary_uart) };
         const char* uart_names[2] = { "uart1", "uart2" };
+        board_uart_port_t uart_ports[2] = { BOARD_UART_GNSS_PRIMARY, BOARD_UART_GNSS_SECONDARY };
+
         for (int u = 0; u < 2; u++) {
             const transport_uart_t* uart = uarts[u];
+            const char* p = uart_names[u];
+
+            /* Pin info */
+            {
+                board_uart_pins_t pins;
+                if (board_profile_get_uart_pins(uart_ports[u], &pins)) {
+                    jw_printf(&jw, "\"%s_pin_tx\":%d,", p, pins.tx_pin);
+                    jw_printf(&jw, "\"%s_pin_rx\":%d,", p, pins.rx_pin);
+                    jw_printf(&jw, "\"%s_baud\":%u,", p, BOARD_GNSS_UART_BAUDRATE);
+                }
+            }
+
             if (uart != NULL) {
                 const transport_uart_stats_t* st = transport_uart_get_stats(uart);
                 if (st != NULL) {
-                    jw_printf(&jw, "\"%s_rx_bytes\":%u,", uart_names[u], st->rx_bytes_in);
-                    jw_printf(&jw, "\"%s_tx_bytes\":%u,", uart_names[u], st->tx_bytes_out);
-                    jw_printf(&jw, "\"%s_rx_overflows\":%u,", uart_names[u], st->rx_overflow_count);
-                    jw_printf(&jw, "\"%s_tx_errors\":%u,", uart_names[u], st->tx_errors);
+                    /* Cumulative stats */
+                    jw_printf(&jw, "\"%s_rx_bytes\":%u,", p, st->rx_bytes_in);
+                    jw_printf(&jw, "\"%s_tx_bytes\":%u,", p, st->tx_bytes_out);
+                    jw_printf(&jw, "\"%s_rx_overflows\":%u,", p, st->rx_overflow_count);
+                    jw_printf(&jw, "\"%s_tx_errors\":%u,", p, st->tx_errors);
+
+                    /* Rate stats */
+                    jw_printf(&jw, "\"%s_rx_bytes_per_s\":%u,", p, st->rx_bytes_per_s);
+                    jw_printf(&jw, "\"%s_rx_overruns_per_s\":%u,", p, st->rx_overruns_per_s);
+                    jw_printf(&jw, "\"%s_rx_ring_stat_errors\":%u,", p, st->rx_ring_stat_errors);
                 }
+
+                /* Buffer diagnostics (ringbuffer fill levels) */
+                transport_uart_diagnostics_t diag;
+                if (transport_uart_diagnostics(uart, &diag) == HAL_OK) {
+                    jw_printf(&jw, "\"%s_rx_buffer_capacity\":%u,", p, diag.rx_buffer_size);
+                    jw_printf(&jw, "\"%s_rx_buffer_used\":%u,", p, diag.rx_buffer_used);
+                    jw_printf(&jw, "\"%s_rx_buffer_free\":%u,", p, diag.rx_buffer_free);
+                    jw_printf(&jw, "\"%s_tx_buffer_capacity\":%u,", p, diag.tx_buffer_size);
+                    jw_printf(&jw, "\"%s_tx_buffer_used\":%u,", p, diag.tx_buffer_used);
+                }
+            } else {
+                jw_kv_str(&jw, p, "not_available");
             }
         }
     }
@@ -1000,15 +1037,16 @@ static esp_err_t index_handler(httpd_req_t* req)
         "<style>\n"
         "*{margin:0;padding:0;box-sizing:border-box}\n"
         "body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}\n"
-        ".container{max-width:800px;margin:0 auto;padding:24px 16px}\n"
+        ".container{max-width:860px;margin:0 auto;padding:24px 16px}\n"
         "h1{font-size:1.4rem;margin-bottom:4px;color:#38bdf8}\n"
         ".sub{font-size:0.8rem;color:#94a3b8;margin-bottom:24px}\n"
         "h2{font-size:0.85rem;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin:20px 0 8px;padding-bottom:4px;border-bottom:1px solid #1e293b}\n"
+        "h2 .count{font-weight:400;opacity:0.6}\n"
         "table{width:100%;border-collapse:collapse}\n"
-        "td{padding:6px 8px;font-size:0.82rem;border-bottom:1px solid #1e293b}\n"
-        "td:first-child{font-family:'SF Mono',Consolas,monospace;color:#38bdf8;white-space:nowrap}\n"
-        "td:nth-child(2){color:#94a3b8;width:80px}\n"
-        "td:last-child{color:#cbd5e1}\n"
+        "td{padding:5px 8px;font-size:0.8rem;border-bottom:1px solid #1e293b;vertical-align:top}\n"
+        "td.uri{font-family:'SF Mono',Consolas,monospace;color:#38bdf8;white-space:nowrap;width:180px}\n"
+        "td.method{color:#94a3b8;width:52px;text-align:center}\n"
+        "td.desc{color:#cbd5e1;line-height:1.45}\n"
         "a{color:#38bdf8;text-decoration:none}\n"
         "a:hover{text-decoration:underline}\n"
         ".danger{color:#f87171}\n"
@@ -1023,48 +1061,188 @@ static esp_err_t index_handler(httpd_req_t* req)
         "<h1>AOG ESP Multiboard</h1>\n"
         "<div class='sub'>Firmware Remote Interface &mdash; Navigation Board</div>\n"
         "\n"
-        "<h2>System</h2>\n"
+        /* ---- System ---- */
+        "<h2>System <span class='count'>(4 endpoints)</span></h2>\n"
         "<table>\n"
-        "<tr><td><a href='/status'>/status</a></td><td><span class='badge badge-get'>GET</span></td><td>Full JSON status (GNSS, NTRIP, RTCM, OTA, network)</td></tr>\n"
-        "<tr><td><a href='/diag'>/diag</a></td><td><span class='badge badge-get'>GET</span></td><td>Plain-text diagnostic dump</td></tr>\n"
-        "<tr><td><a href='/version'>/version</a></td><td><span class='badge badge-get'>GET</span></td><td>Firmware version &amp; partition info</td></tr>\n"
-        "<tr><td><a href='/reboot' class='danger'>/reboot</a></td><td><span class='badge badge-get'>GET</span></td><td class='danger'>Restart ESP32 (1s delay)</td></tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/status'>/status</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Comprehensive JSON status of the entire board: board type, role (NAV), system mode, uptime, reset reason, "
+        "network (IP/netmask/gateway), fast-loop health, both GNSS receivers (position, fix type, RTK, satellites, HDOP, "
+        "NMEA sentence counts, per-sentence ages, correction age), NTRIP client state and byte counters, RTCM router throughput "
+        "and per-UART output stats, AOG PGN214 counters, UART rx/tx stats, health state, UDP binding, dual-heading result, "
+        "and full OTA state (partition, progress, reboot pending)</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/diag'>/diag</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Human-readable plain-text diagnostic dump with the same data as /status but formatted for terminal reading. "
+        "Useful for quick SSH/telnet checks or curl sessions</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/version'>/version</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Firmware identification: project name, framework (ESP-IDF / PlatformIO), task IDs, and the "
+        "currently running OTA partition label</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/reboot' class='danger'>/reboot</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc danger'>Trigger a controlled ESP32 restart with 1-second grace period. "
+        "Returns a JSON confirmation before rebooting</td>"
+        "</tr>\n"
         "</table>\n"
         "\n"
-        "<h2>OTA Firmware Update</h2>\n"
+        /* ---- OTA ---- */
+        "<h2>OTA Firmware Update <span class='count'>(2 endpoints)</span></h2>\n"
         "<table>\n"
-        "<tr><td><a href='/ota/status'>/ota/status</a></td><td><span class='badge badge-get'>GET</span></td><td>OTA partition &amp; state info</td></tr>\n"
-        "<tr><td>/ota</td><td><span class='badge badge-post'>POST</span></td><td>Upload firmware binary (auto-reboot)</td></tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/ota/status'>/ota/status</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>OTA subsystem state: whether OTA is supported on this board, if a partition is ready to receive, "
+        "currently active/next partition labels, last update result and error code, bytes received vs. image size, "
+        "and whether a reboot is pending to apply the new firmware</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'>/ota</td>"
+        "<td class='method'><span class='badge badge-post'>POST</span></td>"
+        "<td class='desc'>Upload a new firmware binary (raw .bin file with Content-Length header). "
+        "Writes to the inactive OTA partition, validates, then auto-reboots after 2 seconds to apply</td>"
+        "</tr>\n"
         "</table>\n"
         "\n"
-        "<h2>Remote Log</h2>\n"
+        /* ---- Remote Log ---- */
+        "<h2>Remote Log <span class='count'>(5 endpoints)</span></h2>\n"
         "<table>\n"
-        "<tr><td><a href='/logs'>/logs</a></td><td><span class='badge badge-get'>GET</span></td><td>Full log buffer (text)</td></tr>\n"
-        "<tr><td><a href='/logs?tail=50'>/logs?tail=N</a></td><td><span class='badge badge-get'>GET</span></td><td>Last N lines from ringbuffer</td></tr>\n"
-        "<tr><td><a href='/logs/status'>/logs/status</a></td><td><span class='badge badge-get'>GET</span></td><td>Log buffer stats (JSON)</td></tr>\n"
-        "<tr><td><a href='/logs/clear'>/logs/clear</a></td><td><span class='badge badge-post'>POST</span></td><td>Clear log ringbuffer</td></tr>\n"
-        "<tr><td><a href='/logs/view'>/logs/view</a></td><td><span class='badge badge-get'>GET</span></td><td>Auto-refreshing HTML log viewer</td></tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/logs'>/logs</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Dump the entire 32 KB boot log ringbuffer as plain text. "
+        "Contains ESP-IDF log output captured from the earliest boot stage, including messages before the network was up</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/logs?tail=50'>/logs?tail=N</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Return only the last N lines from the ringbuffer. Ideal for monitoring recent activity "
+        "without fetching the full buffer</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/logs/status'>/logs/status</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Log subsystem statistics as JSON: initialization state, buffer size, used bytes, "
+        "total lines written vs. dropped, bytes overwritten, and early-boot capture counts</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'>/logs/clear</td>"
+        "<td class='method'><span class='badge badge-post'>POST</span></td>"
+        "<td class='desc'>Reset the log ringbuffer to empty. Use before capturing a fresh log sequence to eliminate noise</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/logs/view'>/logs/view</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Embedded HTML log viewer with auto-refresh (1-second interval). Displays the last 200 lines "
+        "in a monospace console-style layout. Works directly in the browser</td>"
+        "</tr>\n"
         "</table>\n"
         "\n"
-        "<h2>GNSS Configuration</h2>\n"
+        /* ---- GNSS Config Snapshot ---- */
+        "<h2>GNSS Boot Config Snapshot <span class='count'>(4 endpoints)</span></h2>\n"
         "<table>\n"
-        "<tr><td><a href='/gnss/config_snapshot'>/gnss/config_snapshot</a></td><td><span class='badge badge-get'>GET</span></td><td>Boot snapshot (both receivers)</td></tr>\n"
-        "<tr><td><a href='/gnss/1/config_snapshot'>/gnss/1/config_snapshot</a></td><td><span class='badge badge-get'>GET</span></td><td>Boot snapshot receiver 1</td></tr>\n"
-        "<tr><td><a href='/gnss/2/config_snapshot'>/gnss/2/config_snapshot</a></td><td><span class='badge badge-get'>GET</span></td><td>Boot snapshot receiver 2</td></tr>\n"
-        "<tr><td><a href='/gnss/config_status'>/gnss/config_status</a></td><td><span class='badge badge-get'>GET</span></td><td>Snapshot status (JSON)</td></tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/config_snapshot'>/gnss/config_snapshot</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Combined boot-time UM980 config dump from both receivers captured during startup sequence. "
+        "Shows the hardware state as it was when the GNSS modules first responded after power-on</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/1/config_snapshot'>/gnss/1/config_snapshot</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Boot snapshot for receiver 1 (primary) only</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/2/config_snapshot'>/gnss/2/config_snapshot</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Boot snapshot for receiver 2 (secondary / heading) only</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/config_status'>/gnss/config_status</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Snapshot capture metadata as JSON: whether both receivers completed successfully, "
+        "timeout flags, captured byte counts, and total capture duration in milliseconds</td>"
+        "</tr>\n"
         "</table>\n"
         "\n"
-        "<h2>GNSS Commands (Wildcard /gnss/*)</h2>\n"
+        /* ---- GNSS Live Commands ---- */
+        "<h2>GNSS Live Commands <span class='count'>(11 endpoints)</span></h2>\n"
         "<table>\n"
-        "<tr><td><a href='/gnss/config'>/gnss/config</a></td><td><span class='badge badge-get'>GET</span></td><td>Live query VERSIONA+CONFIG+MODE+MASK (both)</td></tr>\n"
-        "<tr><td><a href='/gnss/1/config'>/gnss/1/config</a></td><td><span class='badge badge-get'>GET</span></td><td>Live config query receiver 1</td></tr>\n"
-        "<tr><td><a href='/gnss/2/config'>/gnss/2/config</a></td><td><span class='badge badge-get'>GET</span></td><td>Live config query receiver 2</td></tr>\n"
-        "<tr><td><a href='/gnss/1/status'>/gnss/1/status</a></td><td><span class='badge badge-get'>GET</span></td><td>Control layer stats receiver 1</td></tr>\n"
-        "<tr><td><a href='/gnss/2/status'>/gnss/2/status</a></td><td><span class='badge badge-get'>GET</span></td><td>Control layer stats receiver 2</td></tr>\n"
-        "<tr><td><a href='/gnss/1/send/VERSIONA'>/gnss/1/send/&lt;cmd&gt;</a></td><td><span class='badge badge-get'>GET</span></td><td>Send command to receiver 1</td></tr>\n"
-        "<tr><td><a href='/gnss/2/send/VERSIONA'>/gnss/2/send/&lt;cmd&gt;</a></td><td><span class='badge badge-get'>GET</span></td><td>Send command to receiver 2</td></tr>\n"
-        "<tr><td><a href='/gnss/1/unlogall' class='warn'>/gnss/1/unlogall</a></td><td><span class='badge badge-get'>GET</span></td><td class='warn'>UNLOGALL receiver 1</td></tr>\n"
-        "<tr><td><a href='/gnss/2/unlogall' class='warn'>/gnss/2/unlogall</a></td><td><span class='badge badge-get'>GET</span></td><td class='warn'>UNLOGALL receiver 2</td></tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/config'>/gnss/config</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Send VERSIONA, CONFIG, MODE, and MASK queries to both receivers in sequence and return "
+        "the combined plain-text response. Blocking &mdash; takes up to several seconds per receiver (2s timeout each)</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/status'>/gnss/status</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Control layer statistics for both receivers as JSON: availability, initialization state, "
+        "and command counters (sent, ok, timeout, blocked) for each receiver's command interface</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/1/config'>/gnss/1/config</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Live config query for receiver 1 only: VERSIONA + CONFIG + MODE + MASK. "
+        "Sends 4 sequential commands with 2s timeout each. Returns plain text</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/1/status'>/gnss/1/status</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Control layer status for receiver 1 as JSON: initialized, command active flag, "
+        "and cumulative command counters (sent/ok/timeout/blocked)</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/2/config'>/gnss/2/config</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Live config query for receiver 2 only (secondary / heading receiver). "
+        "Same 4-command sequence as /gnss/1/config but targeting the second UART</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/2/status'>/gnss/2/status</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Control layer status for receiver 2 as JSON. Same fields as /gnss/1/status "
+        "but for the secondary receiver</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/1/send/VERSIONA'>/gnss/1/send/&lt;cmd&gt;</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Send an arbitrary UM980 command to receiver 1 and return the response as JSON. "
+        "Example: /gnss/1/send/GNGGA returns the raw GNGGA sentence. Reports success/error, byte count, "
+        "and response duration. URL-decodes the command string</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/2/send/VERSIONA'>/gnss/2/send/&lt;cmd&gt;</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Send an arbitrary UM980 command to receiver 2 (secondary). "
+        "Same JSON response format as /gnss/1/send/</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/1/unlogall' class='warn'>/gnss/1/unlogall</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc warn'>Send UNLOGALL command to receiver 1 to stop all active message logs. "
+        "The receiver will stop outputting NMEA/RTCM data until logs are re-enabled. "
+        "Use with caution during active operation</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'><a href='/gnss/2/unlogall' class='warn'>/gnss/2/unlogall</a></td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc warn'>Send UNLOGALL to receiver 2 (secondary / heading). "
+        "Stops all message output on the second UART. Use with caution</td>"
+        "</tr>\n"
+        "<tr>"
+        "<td class='uri'>/gnss/*</td>"
+        "<td class='method'><span class='badge badge-get'>GET</span></td>"
+        "<td class='desc'>Wildcard catch-all for any /gnss/ path not explicitly registered above. "
+        "Routed to the same command handler &mdash; parsed as receiver number + action + optional parameter</td>"
+        "</tr>\n"
         "</table>\n"
         "\n"
         "</div>\n"
@@ -1166,9 +1344,33 @@ static esp_err_t logs_clear_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+/* ---- HTML escaping for /logs/view streaming ---- */
+static size_t html_escape_chunk(const char* src, size_t src_len,
+                                 char* dst, size_t dst_cap)
+{
+    /* Escape &, <, >, ", ' for safe HTML embedding.
+     * Returns number of bytes written to dst (no NUL terminator). */
+    size_t di = 0;
+    for (size_t si = 0; si < src_len && di + 6 < dst_cap; si++) {
+        unsigned char c = (unsigned char)src[si];
+        switch (c) {
+            case '&':  memcpy(dst+di, "&amp;",  5); di += 5; break;
+            case '<':  memcpy(dst+di, "&lt;",   4); di += 4; break;
+            case '>':  memcpy(dst+di, "&gt;",   4); di += 4; break;
+            case '"': memcpy(dst+di, "&quot;", 6); di += 6; break;
+            case '\'': memcpy(dst+di, "&#39;",  5); di += 5; break;
+            default:   dst[di++] = c; break;
+        }
+    }
+    return di;
+}
+
 static esp_err_t logs_view_handler(httpd_req_t* req)
 {
-    const char* html =
+    /* Chunked HTML streaming — no large stack buffers.
+     * Reads ringbuffer in segments and HTML-escapes each chunk. */
+
+    static const char HTML_HEAD[] =
         "<!doctype html>"
         "<html><head><meta charset='utf-8'>"
         "<title>AOG NAV Logs</title>"
@@ -1176,23 +1378,80 @@ static esp_err_t logs_view_handler(httpd_req_t* req)
         "body{font-family:monospace;background:#111;color:#ddd;margin:0;padding:8px}"
         "pre{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.4}"
         "h1{font-size:16px;margin:0 0 8px;color:#4a4}"
+        ".meta{color:#888;font-size:12px;margin-bottom:8px}"
         "</style></head><body>"
         "<h1>AOG NAV Logs</h1>"
-        "<pre id='logs'>Loading...</pre>"
+        "<pre id='logs'>";
+
+    static const char HTML_FOOT[] =
+        "</pre>"
+        "<div class='meta' id='meta'></div>"
         "<script>"
+        "var autoRefresh=true;"
         "async function refresh(){"
+        "  if(!autoRefresh)return;"
         "  try{"
-        "    const r=await fetch('/logs?tail=200');"
-        "    document.getElementById('logs').textContent=await r.text();"
-        "  }catch(e){}"
+        "    const r=await fetch('/logs?tail=500');"
+        "    const txt=await r.text();"
+        "    document.getElementById('logs').textContent=txt;"
+        "    var lines=txt.split('\n').length;"
+        "    document.getElementById('meta').textContent=lines+' lines | auto-refresh: '+autoRefresh;"
+        "  }catch(e){document.getElementById('meta').textContent='fetch error';}"
         "}"
-        "setInterval(refresh,1000);"
+        "setInterval(refresh,2000);"
         "refresh();"
         "</script></body></html>";
 
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_send(req, html, strlen(html));
-    return ESP_OK;
+    esp_err_t err;
+
+    /* Send HTML head */
+    err = httpd_resp_send_chunk(req, HTML_HEAD, sizeof(HTML_HEAD) - 1);
+    if (err != ESP_OK) return err;
+
+    /* Read full log and stream chunked with HTML escaping */
+    size_t log_size = 32768;
+    char* log_buf = malloc(log_size);
+    if (log_buf != NULL) {
+        size_t written = remote_log_read(log_buf, log_size);
+
+        /* Escape and send in chunks */
+        size_t src_pos = 0;
+        while (src_pos < written) {
+            /* Find a safe chunk boundary (prefer newline boundaries) */
+            size_t raw_chunk_len = written - src_pos;
+            if (raw_chunk_len > LOG_CHUNK_SIZE) {
+                raw_chunk_len = LOG_CHUNK_SIZE;
+                /* Try to break at last newline within chunk */
+                for (size_t k = raw_chunk_len; k > raw_chunk_len / 2; k--) {
+                    if (log_buf[src_pos + k] == '\n') {
+                        raw_chunk_len = k + 1;
+                        break;
+                    }
+                }
+            }
+
+            /* HTML-escape the chunk */
+            char esc_buf[LOG_CHUNK_SIZE * 2 + 64];  /* worst case: every char → &quot; */
+            size_t esc_len = html_escape_chunk(log_buf + src_pos, raw_chunk_len,
+                                               esc_buf, sizeof(esc_buf));
+            if (esc_len > 0) {
+                err = httpd_resp_send_chunk(req, esc_buf, esc_len);
+                if (err != ESP_OK) break;
+            }
+            src_pos += raw_chunk_len;
+        }
+
+        free(log_buf);
+    }
+    /* If malloc failed, we still send the footer — just with no log content */
+
+    /* Send HTML footer */
+    err = httpd_resp_send_chunk(req, HTML_FOOT, sizeof(HTML_FOOT) - 1);
+    if (err != ESP_OK) return err;
+
+    /* Final NULL chunk to signal end */
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 /* =================================================================
@@ -1368,11 +1627,19 @@ static esp_err_t gnss_cmd_handler(httpd_req_t* req)
                                                       response, sizeof(response), 0);
         uint32_t t_duration = (uint32_t)(esp_timer_get_time() / 1000) - t_start;
 
-        char json_buf[12288];
-        char escaped[GNSS_CTRL_MAX_RESPONSE * 2];
-        json_escape_str(response, strlen(response), escaped, sizeof(escaped));
+        /* Allocate JSON and escaped buffers on HEAP (stack too small) */
+        char* json_buf = malloc(GNSS_CMD_JSON_BUF_SIZE);
+        char* escaped = malloc(GNSS_CMD_ESC_BUF_SIZE);
+        if (json_buf == NULL || escaped == NULL) {
+            free(json_buf);
+            free(escaped);
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
 
-        int n = snprintf(json_buf, sizeof(json_buf),
+        json_escape_str(response, strlen(response), escaped, GNSS_CMD_ESC_BUF_SIZE);
+
+        int n = snprintf(json_buf, GNSS_CMD_JSON_BUF_SIZE,
             "{\n"
             "  \"receiver\": %d,\n"
             "  \"command\": \"%s\",\n"
@@ -1390,15 +1657,23 @@ static esp_err_t gnss_cmd_handler(httpd_req_t* req)
             escaped);
 
         httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, json_buf, (n > 0) ? (size_t)n : 0);
-        return ESP_OK;
+        esp_err_t ret = httpd_resp_send(req, json_buf, (n > 0) ? (size_t)n : 0);
+        free(escaped);
+        free(json_buf);
+        return ret;
     }
 
     /* ---- Action: /gnss/<n>/config (live query) ---- */
     if (strcmp(action, "config") == 0) {
-        char text_buf[GNSS_CTRL_MAX_RESPONSE * 5];
+        /* Allocate on HEAP — GNSS_CMD_TEXT_BUF_SIZE (20KB) exceeds HTTP task stack */
+        char* text_buf = malloc(GNSS_CMD_TEXT_BUF_SIZE);
+        if (text_buf == NULL) {
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+
         int pos = 0;
-        int text_cap = (int)sizeof(text_buf) - 1;
+        int text_cap = (int)GNSS_CMD_TEXT_BUF_SIZE - 1;
 
         int rx_start = (receiver == 0) ? 1 : receiver;
         int rx_end   = (receiver == 0) ? 2 : receiver;
@@ -1434,8 +1709,9 @@ static esp_err_t gnss_cmd_handler(httpd_req_t* req)
         }
 
         httpd_resp_set_type(req, "text/plain");
-        httpd_resp_send(req, text_buf, (pos > 0) ? (size_t)pos : 0);
-        return ESP_OK;
+        esp_err_t ret = httpd_resp_send(req, text_buf, (pos > 0) ? (size_t)pos : 0);
+        free(text_buf);
+        return ret;
     }
 
     /* ---- Action: /gnss/<n>/status ---- */
@@ -1536,6 +1812,76 @@ static esp_err_t gnss_cmd_handler(httpd_req_t* req)
 }
 
 /* =================================================================
+ * /endpoints handler — inventory of all registered HTTP endpoints
+ * ================================================================= */
+
+typedef struct {
+    const char* uri;
+    const char* method;
+    const char* name;
+} remote_diag_endpoint_info_t;
+
+static const remote_diag_endpoint_info_t s_endpoint_registry[] = {
+    { "/",                    "GET",  "Index page" },
+    { "/status",              "GET",  "System status (JSON)" },
+    { "/diag",                "GET",  "Text diagnostics" },
+    { "/version",             "GET",  "Firmware version" },
+    { "/ota/status",          "GET",  "OTA partition status" },
+    { "/ota",                 "POST", "OTA firmware upload" },
+    { "/reboot",              "GET",  "Controlled reboot" },
+    { "/logs",                "GET",  "Log buffer (plain text)" },
+    { "/logs/status",         "GET",  "Log buffer statistics" },
+    { "/logs/clear",          "POST", "Clear log buffer" },
+    { "/logs/view",           "GET",  "HTML log viewer (streaming)" },
+    { "/gnss/config_snapshot","GET",  "Combined GNSS config snapshot" },
+    { "/gnss/1/config_snapshot","GET","GNSS receiver 1 snapshot" },
+    { "/gnss/2/config_snapshot","GET","GNSS receiver 2 snapshot" },
+    { "/gnss/config_status",  "GET",  "GNSS snapshot status (JSON)" },
+    { "/gnss/config",         "GET",  "GNSS live config query (both)" },
+    { "/gnss/status",         "GET",  "GNSS control status (both)" },
+    { "/gnss/1/config",       "GET",  "GNSS live config (RX1)" },
+    { "/gnss/1/status",       "GET",  "GNSS control status (RX1)" },
+    { "/gnss/1/unlogall",     "GET",  "GNSS UNLOGALL (RX1)" },
+    { "/gnss/2/config",       "GET",  "GNSS live config (RX2)" },
+    { "/gnss/2/status",       "GET",  "GNSS control status (RX2)" },
+    { "/gnss/2/unlogall",     "GET",  "GNSS UNLOGALL (RX2)" },
+    { "/gnss/*",              "GET",  "GNSS wildcard (send commands)" },
+    { "/endpoints",           "GET",  "Endpoint inventory (JSON)" },
+};
+#define ENDPOINT_REGISTRY_COUNT  (sizeof(s_endpoint_registry) / sizeof(s_endpoint_registry[0]))
+
+static esp_err_t endpoints_handler(httpd_req_t* req)
+{
+    httpd_resp_set_type(req, "application/json");
+    /* Build JSON on heap — registry has 25 entries, ~2KB output max */
+    char* buf = malloc(2048);
+    if (buf == NULL) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    int pos = 0;
+    int cap = 2047;
+    pos += snprintf(buf + pos, cap - pos, "{\n  \"count\": %u,\n  \"endpoints\": [\n",
+                    (unsigned)ENDPOINT_REGISTRY_COUNT);
+
+    for (size_t i = 0; i < ENDPOINT_REGISTRY_COUNT; i++) {
+        pos += snprintf(buf + pos, cap - pos,
+            "    {\"uri\":\"%s\",\"method\":\"%s\",\"name\":\"%s\"}%s\n",
+            s_endpoint_registry[i].uri,
+            s_endpoint_registry[i].method,
+            s_endpoint_registry[i].name,
+            (i + 1 < ENDPOINT_REGISTRY_COUNT) ? "," : "");
+    }
+
+    pos += snprintf(buf + pos, cap - pos, "  ]\n}\n");
+
+    esp_err_t ret = httpd_resp_send(req, buf, (pos > 0) ? (size_t)pos : 0);
+    free(buf);
+    return ret;
+}
+
+/* =================================================================
  * Public API
  * ================================================================= */
 
@@ -1619,13 +1965,23 @@ void remote_diag_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         /* Stack must be large enough for build_status_json (8KB json_buf)
          * plus json_writer_t (~24B) + net_status_t (~80B) + nested calls
          * + vsnprintf overhead.  4096 caused LoadProhibited crash.
-         * 16384 gives comfortable headroom.  ESP32 has ~180 KB free heap. */
-        config.stack_size = 16384;
+         * Must exceed worst-case handler stack usage:
+         *   - status_handler:   8192 (json_buf) + ~1KB nested
+         *   - diag_handler:     8192 (text_buf)  + ~1KB nested
+         *   - ota_upload:       4096 (buf) + ~0.5KB
+         *   - gnss_cmd (config): heap-allocated text_buf (safe)
+         *   - gnss_cmd (send):   heap-allocated json_buf+escaped (safe)
+         *   - logs (view):       heap-allocated log_buf (safe)
+         * 24576 gives 8KB headroom above worst stack user. */
+        config.stack_size = HTTPD_STACK_SIZE;
 
         httpd_handle_t server = NULL;
         esp_err_t err = httpd_start(&server, &config);
         if (err == ESP_OK) {
-            httpd_uri_t uris[] = {
+            /* Static URI array — ensures all strings/handlers outlive registration.
+             * httpd_register_uri_handler() copies URI string internally,
+             * but static storage eliminates any lifetime risk. */
+            static const httpd_uri_t uris[] = {
                 { .uri = "/",              .method = HTTP_GET,  .handler = index_handler,         .user_ctx = NULL },
                 { .uri = "/status",        .method = HTTP_GET,  .handler = status_handler,        .user_ctx = NULL },
                 { .uri = "/diag",          .method = HTTP_GET,  .handler = diag_handler,          .user_ctx = NULL },
@@ -1654,14 +2010,18 @@ void remote_diag_service_step(runtime_component_t* comp, uint64_t timestamp_us)
                 { .uri = "/gnss/2/unlogall",       .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
                 /* Wildcard fallback for parameterized /gnss/<n>/send/<cmd> */
                 { .uri = "/gnss/*",                .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
+                /* Endpoint inventory */
+                { .uri = "/endpoints",             .method = HTTP_GET,  .handler = endpoints_handler,        .user_ctx = NULL },
             };
             for (int i = 0; i < (int)(sizeof(uris) / sizeof(uris[0])); i++) {
                 httpd_register_uri_handler(server, &uris[i]);
             }
 
             diag->http_server = (void*)server;
-            ESP_LOGI(TAG, "HTTP server started on port %d (ip=%s, %d endpoints)",
-                     REMOTE_DIAG_HTTP_PORT, ns.ip, (int)(sizeof(uris) / sizeof(uris[0])));
+            ESP_LOGI(TAG, "HTTP server started on port %d (ip=%s, %d endpoints, stack=%u bytes)",
+                     REMOTE_DIAG_HTTP_PORT, ns.ip,
+                     (int)(sizeof(uris) / sizeof(uris[0])),
+                     (unsigned)HTTPD_STACK_SIZE);
         } else {
             ESP_LOGE(TAG, "HTTP server start failed: 0x%x (%s)",
                      (unsigned)err, esp_err_to_name(err));

@@ -465,6 +465,22 @@ void nmea_parser_init(nmea_parser_t* parser)
     parser->state = NMEA_STATE_IDLE;
 }
 
+/* ---- Feed one byte into the NMEA state machine ----
+ *
+ * Recovery behaviour:
+ *   - IDLE state silently discards non-'$' bytes (garbage_discarded++).
+ *     When a '$' arrives, parsing starts immediately — no resync delay.
+ *     This handles partial sentences from UART bursts and RTCM binary data
+ *     mixed with NMEA on the same UART.
+ *   - DATA state rejects bytes outside 0x20..0x7E (binary_rejects++),
+ *     resets to IDLE, and returns NMEA_RESULT_BINARY_REJECT.
+ *   - Buffer overflow (>= NMEA_MAX_SENTENCE_LEN) resets to IDLE and
+ *     returns NMEA_RESULT_OVERFLOW without corrupting parser state.
+ *   - Checksum mismatch clears parser->type to NMEA_SENTENCE_NONE so
+ *     downstream consumers cannot accidentally use stale parsed data.
+ *     Returns NMEA_RESULT_INVALID_CHECKSUM — the caller (gnss_um980.c)
+ *     must NOT copy parsed data or set dirty flags on this result.
+ */
 nmea_result_t nmea_parser_feed(nmea_parser_t* parser, uint8_t byte)
 {
     switch (parser->state) {

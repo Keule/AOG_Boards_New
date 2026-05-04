@@ -10,11 +10,12 @@
 
 | Parameter         | Wert | Begründung                                                       |
 |-------------------|------|------------------------------------------------------------------|
-| RX-Buffer         | 1024 | Bei 921600 baud (~10.8 µs/Byte) reicht 256 Bytes für ~2.8 ms.   |
-|                   |      | Mit 1024 Bytes werden ~11 ms abgedeckt, was den 10 ms           |
-|                   |      | Service-Zyklus sicher überbrückt und Overflows verhindert.       |
-| TX-Buffer         | 512  | RTCM-Korrekturdaten können Burst-artig ankommen.                 |
-|                   |      | 512 Bytes deckt mehrere RTCM3-Nachrichten ab.                    |
+| RX-Buffer         | 4096 | Bei 921600 baud (~12 KB/s GNSS-Datenstrom). 4096 Bytes decken ~340 ms  |
+|                   |      | ab und verhindern Overflows auch bei Busy-Phasen.                 |
+|                   |      | (War 1024, erhöht wegen Overflow-Problemen bei 921600 baud.)     |
+| TX-Buffer         | 1024 | RTCM-Korrekturdaten können Burst-artig ankommen.                 |
+|                   |      | 1024 Bytes deckt mehrere RTCM3-Nachrichten ab.                    |
+|                   |      | (War 512, erhöht für RTCM-Burst-Sicherheit.)                     |
 | RX/TX-Burstgröße  | 128  | Bytes pro service_step Lese-/Schreib-Batch.                      |
 |                   |      | 128 Bytes passen komfortabel in den Stack und minimieren         |
 |                   |      | die Anzahl der HAL-Aufrufe pro Zyklus.                           |
@@ -24,8 +25,8 @@
 Diese Werte MÜSSEN mit den Defines in `transport_uart.h` übereinstimmen:
 
 ```c
-#define TRANSPORT_UART_RX_BUFFER_SIZE  1024
-#define TRANSPORT_UART_TX_BUFFER_SIZE  512
+#define TRANSPORT_UART_RX_BUFFER_SIZE  4096
+#define TRANSPORT_UART_TX_BUFFER_SIZE  1024
 #define TRANSPORT_UART_BURST_SIZE      128
 ```
 

@@ -41,6 +41,14 @@
  *   - /gnss/1/unlogall         — GET send UNLOGALL to receiver 1
  *   - /gnss/2/unlogall         — GET send UNLOGALL to receiver 2
  *
+ * NAV-REMOTE-WEB-REGRESSION-FIX-001 additions:
+ *   - /endpoints              — GET endpoint inventory (JSON)
+ *   - Stack overflow fix: gnss_cmd_handler large buffers moved to heap
+ *   - HTTPD stack increased to 24576 bytes
+ *   - /logs/view rewritten as chunked HTML streaming with escaping
+ *   - Static URI registration array (no stack-local lifetime risk)
+ *   - Stack size logged at server start
+ *
  * HARD RULES:
  *   - No code in task_fast / Core 1
  *   - HTTP server starts only after Ethernet link-up AND IP obtained
@@ -60,7 +68,7 @@ extern "C" {
 
 /* ---- HTTP server configuration ---- */
 #define REMOTE_DIAG_HTTP_PORT       80
-#define REMOTE_DIAG_MAX_URI_HANDLERS 28
+#define REMOTE_DIAG_MAX_URI_HANDLERS 30
 
 /* ---- OTA upload buffer size (4KB chunks) ---- */
 #define REMOTE_DIAG_OTA_BUF_SIZE   4096

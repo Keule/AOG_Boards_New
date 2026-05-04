@@ -290,7 +290,7 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
 
         if (p_uart != NULL) {
             const transport_uart_stats_t* us = transport_uart_get_stats(p_uart);
-            uint32_t rx_buf_used = (uint32_t)byte_ring_buffer_available(&p_uart->rx_buffer);
+            uint32_t rx_buf_used = transport_uart_rx_ring_used(p_uart);
             uint32_t rx_buf_size = (uint32_t)p_uart->rx_buffer.capacity;
             uint32_t tx_bytes = (us != NULL) ? us->tx_bytes_out : 0;
             uint32_t tx_drops = (router != NULL && router->output_count >= 1)
@@ -308,7 +308,7 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
 
         if (s_uart != NULL) {
             const transport_uart_stats_t* us = transport_uart_get_stats(s_uart);
-            uint32_t rx_buf_used = (uint32_t)byte_ring_buffer_available(&s_uart->rx_buffer);
+            uint32_t rx_buf_used = transport_uart_rx_ring_used(s_uart);
             uint32_t rx_buf_size = (uint32_t)s_uart->rx_buffer.capacity;
             uint32_t tx_bytes = (us != NULL) ? us->tx_bytes_out : 0;
             uint32_t tx_drops = (router != NULL && router->output_count >= 2)
