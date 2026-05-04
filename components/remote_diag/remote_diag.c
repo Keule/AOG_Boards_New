@@ -4,6 +4,14 @@
  * Minimal HTTP server using ESP-IDF esp_http_server.
  * Provides /status, /diag, /version endpoints as JSON/text.
  *
+ * 013_REMOTE_MAINTENANCE-002 additions:
+ *   - GET /ota/status — OTA capability, partitions, last result
+ *   - POST /ota        — Firmware binary upload (raw body, auto-reboot)
+ *   - POST /reboot     — Controlled reboot
+ *   - Extended /version with partition info
+ *   - Extended /status with OTA state
+ *   - Extended /diag with OTA state
+ *
  * Architecture:
  *   - HTTP server started after IP obtained (no hal_eth dependency)
  *   - Runs on Core 0 via SERVICE_GROUP_DIAGNOSTICS
@@ -33,6 +41,7 @@
 #include "esp_system.h"
 #include "esp_http_server.h"
 #include "esp_netif.h"
+#include "esp_ota_ops.h"
 
 /* ---- Observed component headers ---- */
 #include "runtime_stats.h"
@@ -49,6 +58,9 @@
 #include "transport_udp.h"
 #include "board_profile.h"
 #include "feature_flags.h"
+
+/* ---- OTA support ---- */
+#include "hal_ota.h"
 
 static const char* TAG = "REMOTE_DIAG";
 
@@ -262,7 +274,7 @@ static void get_net_status(net_status_t* ns)
 }
 
 /* =================================================================
- * /status handler
+ * /status handler (extended with OTA state)
  * ================================================================= */
 
 static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
@@ -572,6 +584,17 @@ static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
         }
     }
 
+    /* ---- OTA State (013) ---- */
+    jw_kv_bool(&jw, "ota_supported", hal_ota_is_supported());
+    jw_kv_bool(&jw, "ota_active", hal_ota_is_in_progress());
+    jw_kv_str(&jw, "ota_running_partition", hal_ota_get_active_partition_label());
+    jw_kv_str(&jw, "ota_next_partition", hal_ota_get_next_partition_label());
+    jw_kv_str(&jw, "ota_last_result", hal_ota_get_state_str());
+    jw_printf(&jw, "\"ota_last_error\":0x%x,", (unsigned)hal_ota_get_last_error());
+    jw_printf(&jw, "\"ota_bytes_received\":%llu,", (unsigned long long)hal_ota_get_bytes_written());
+    jw_printf(&jw, "\"ota_image_size\":%llu,", (unsigned long long)hal_ota_get_bytes_total());
+    jw_kv_bool(&jw, "reboot_pending", hal_ota_is_reboot_pending());
+
     /* Remove trailing comma */
     if (jw.pos > 1 && jw.buf[jw.pos - 1] == ',') {
         jw.buf[jw.pos - 1] = '\0';
@@ -581,14 +604,14 @@ static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
 }
 
 /* =================================================================
- * /diag handler
+ * /diag handler (extended with OTA state)
  * ================================================================= */
 
 static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
 {
     int o = 0;
 
-    o += snprintf(buf + o, buf_size - o, "=== AOG ESP Multiboard Remote Diag (R2) ===\n");
+    o += snprintf(buf + o, buf_size - o, "=== AOG ESP Multiboard Remote Diag (R2 + OTA) ===\n");
 
     /* System */
     o += snprintf(buf + o, buf_size - o,
@@ -743,6 +766,21 @@ static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
             o += snprintf(buf + o, buf_size - o, "AOG: not_available\n");
         }
     }
+
+    /* OTA State (013) */
+    o += snprintf(buf + o, buf_size - o,
+        "OTA: supported=%s state=%s active=%s "
+        "running_partition=%s next_partition=%s "
+        "last_error=0x%x bytes_written=%llu image_size=%llu reboot_pending=%s\n",
+        hal_ota_is_supported() ? "yes" : "no",
+        hal_ota_get_state_str(),
+        hal_ota_is_in_progress() ? "yes" : "no",
+        hal_ota_get_active_partition_label(),
+        hal_ota_get_next_partition_label(),
+        (unsigned)hal_ota_get_last_error(),
+        (unsigned long long)hal_ota_get_bytes_written(),
+        (unsigned long long)hal_ota_get_bytes_total(),
+        hal_ota_is_reboot_pending() ? "yes" : "no");
 }
 
 /* =================================================================
@@ -771,12 +809,171 @@ static esp_err_t diag_handler(httpd_req_t* req)
 
 static esp_err_t version_handler(httpd_req_t* req)
 {
-    const char* v =
+    char buf[512];
+    int o = 0;
+
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const char* part_label = (running != NULL) ? running->label : "unknown";
+
+    o += snprintf(buf + o, sizeof(buf) - o,
         "aog_esp_multiboard\n"
         "framework: esp-idf (platformio)\n"
-        "task: NAV-REMOTE-DIAG-001-R2 + NAV-GNSS-OUTDOOR-VALID-001\n";
+        "task: NAV-REMOTE-DIAG-001-R2 + 013-OTA\n"
+        "partition: %s\n", part_label);
+
     httpd_resp_set_type(req, "text/plain");
-    httpd_resp_send(req, v, strlen(v));
+    httpd_resp_send(req, buf, strlen(buf));
+    return ESP_OK;
+}
+
+/* =================================================================
+ * OTA endpoints (013_REMOTE_MAINTENANCE-002)
+ * ================================================================= */
+
+static esp_err_t ota_status_handler(httpd_req_t* req)
+{
+    char buf[1024];
+    int o = 0;
+
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const char* running_label = (running != NULL) ? running->label : "unknown";
+    const char* next_label = hal_ota_get_next_partition_label();
+
+    o += snprintf(buf + o, sizeof(buf) - o,
+        "{\n"
+        "  \"ota_supported\": %s,\n"
+        "  \"ota_ready\": %s,\n"
+        "  \"ota_active\": %s,\n"
+        "  \"ota_running_partition\": \"%s\",\n"
+        "  \"ota_next_partition\": \"%s\",\n"
+        "  \"ota_last_result\": \"%s\",\n"
+        "  \"ota_last_error\": 0x%x,\n"
+        "  \"ota_bytes_received\": %llu,\n"
+        "  \"ota_image_size\": %llu,\n"
+        "  \"reboot_pending\": %s\n"
+        "}\n",
+        hal_ota_is_supported() ? "true" : "false",
+        (!hal_ota_is_in_progress() && !hal_ota_is_reboot_pending()) ? "true" : "false",
+        hal_ota_is_in_progress() ? "true" : "false",
+        running_label,
+        next_label,
+        hal_ota_get_state_str(),
+        (unsigned)hal_ota_get_last_error(),
+        (unsigned long long)hal_ota_get_bytes_written(),
+        (unsigned long long)hal_ota_get_bytes_total(),
+        hal_ota_is_reboot_pending() ? "true" : "false");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, buf, strlen(buf));
+    return ESP_OK;
+}
+
+static esp_err_t ota_upload_handler(httpd_req_t* req)
+{
+    if (hal_ota_is_in_progress()) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA already in progress");
+        return ESP_FAIL;
+    }
+
+    /* Read Content-Length to know image size */
+    int content_len = req->content_len;
+    if (content_len <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid Content-Length");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "OTA upload started: expected=%d bytes", content_len);
+
+    /* Begin OTA update */
+    hal_err_t herr = hal_ota_begin((size_t)content_len);
+    if (herr != HAL_OK) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "OTA begin failed: err=%d last_esp_err=0x%x",
+                 (int)herr, (unsigned)hal_ota_get_last_error());
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, msg);
+        return ESP_FAIL;
+    }
+
+    /* Read body in chunks and write to OTA partition */
+    uint8_t buf[REMOTE_DIAG_OTA_BUF_SIZE];
+    int remaining = content_len;
+
+    while (remaining > 0) {
+        int to_read = (remaining > (int)sizeof(buf)) ? (int)sizeof(buf) : remaining;
+        int received = httpd_req_recv(req, (char*)buf, to_read);
+
+        if (received <= 0) {
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                /* Timeout — retry */
+                continue;
+            }
+            ESP_LOGE(TAG, "OTA upload aborted: received=%d", received);
+            hal_ota_end();
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "OTA upload aborted: connection lost");
+            return ESP_FAIL;
+        }
+
+        herr = hal_ota_write(buf, (size_t)received);
+        if (herr != HAL_OK) {
+            char msg[128];
+            snprintf(msg, sizeof(msg), "OTA write failed: err=%d esp_err=0x%x",
+                     (int)herr, (unsigned)hal_ota_get_last_error());
+            ESP_LOGE(TAG, "%s", msg);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, msg);
+            return ESP_FAIL;
+        }
+
+        remaining -= received;
+    }
+
+    /* Finalize OTA */
+    herr = hal_ota_end();
+    if (herr != HAL_OK) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "OTA end failed: err=%d esp_err=0x%x",
+                 (int)herr, (unsigned)hal_ota_get_last_error());
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, msg);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "OTA upload complete: %d bytes written. Reboot pending.", content_len);
+
+    char resp_buf[256];
+    snprintf(resp_buf, sizeof(resp_buf),
+        "{\n"
+        "  \"ota_result\": \"ok\",\n"
+        "  \"bytes_received\": %d,\n"
+        "  \"reboot_pending\": true,\n"
+        "  \"message\": \"OTA successful. Rebooting in 2 seconds.\"\n"
+        "}\n",
+        content_len);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp_buf, strlen(resp_buf));
+
+    ESP_LOGW(TAG, "OTA complete — rebooting in 2 seconds");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    esp_restart();
+
+    return ESP_OK;
+}
+
+static esp_err_t reboot_handler(httpd_req_t* req)
+{
+    ESP_LOGW(TAG, "Reboot requested via /reboot endpoint");
+
+    const char* resp =
+        "{\n"
+        "  \"result\": \"rebooting\",\n"
+        "  \"message\": \"System will reboot in 1 second.\"\n"
+        "}\n";
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, strlen(resp));
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_restart();
+
     return ESP_OK;
 }
 
@@ -797,6 +994,9 @@ void remote_diag_init(remote_diag_t* diag)
     diag->boot_time_us = 0;
     diag->http_server = NULL;
     s_diag_instance = diag;
+
+    /* Initialize HAL OTA with ESP32 ops */
+    hal_ota_init(hal_ota_esp32_ops());
 }
 
 void remote_diag_set_sources(remote_diag_t* diag,
@@ -868,17 +1068,20 @@ void remote_diag_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         esp_err_t err = httpd_start(&server, &config);
         if (err == ESP_OK) {
             httpd_uri_t uris[] = {
-                { .uri = "/status", .method = HTTP_GET, .handler = status_handler, .user_ctx = NULL },
-                { .uri = "/diag",   .method = HTTP_GET, .handler = diag_handler,   .user_ctx = NULL },
-                { .uri = "/version",.method = HTTP_GET, .handler = version_handler,.user_ctx = NULL },
+                { .uri = "/status",     .method = HTTP_GET,  .handler = status_handler,     .user_ctx = NULL },
+                { .uri = "/diag",       .method = HTTP_GET,  .handler = diag_handler,       .user_ctx = NULL },
+                { .uri = "/version",    .method = HTTP_GET,  .handler = version_handler,    .user_ctx = NULL },
+                { .uri = "/ota/status", .method = HTTP_GET,  .handler = ota_status_handler, .user_ctx = NULL },
+                { .uri = "/ota",        .method = HTTP_POST, .handler = ota_upload_handler, .user_ctx = NULL },
+                { .uri = "/reboot",     .method = HTTP_POST, .handler = reboot_handler,      .user_ctx = NULL },
             };
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 6; i++) {
                 httpd_register_uri_handler(server, &uris[i]);
             }
 
             diag->http_server = (void*)server;
-            ESP_LOGI(TAG, "HTTP server started on port %d (ip=%s)",
-                     REMOTE_DIAG_HTTP_PORT, ns.ip);
+            ESP_LOGI(TAG, "HTTP server started on port %d (ip=%s, %d endpoints)",
+                     REMOTE_DIAG_HTTP_PORT, ns.ip, 6);
         } else {
             ESP_LOGE(TAG, "HTTP server start failed: 0x%x (%s)",
                      (unsigned)err, esp_err_to_name(err));

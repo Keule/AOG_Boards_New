@@ -5,6 +5,12 @@
  * Minimal HTTP server providing /status, /diag, /version endpoints.
  * Runs exclusively on Core 0 (SERVICE_GROUP_DIAGNOSTICS).
  *
+ * 013_REMOTE_MAINTENANCE-002 additions:
+ *   - /ota/status — OTA capability, partitions, last result
+ *   - /ota        — POST firmware binary upload (raw body)
+ *   - /reboot     — POST controlled reboot
+ *   - Extended /status and /diag with OTA state fields
+ *
  * HARD RULES:
  *   - No code in task_fast / Core 1
  *   - HTTP server starts only after Ethernet link-up AND IP obtained
@@ -24,7 +30,10 @@ extern "C" {
 
 /* ---- HTTP server configuration ---- */
 #define REMOTE_DIAG_HTTP_PORT       80
-#define REMOTE_DIAG_MAX_URI_HANDLERS 4
+#define REMOTE_DIAG_MAX_URI_HANDLERS 8
+
+/* ---- OTA upload buffer size (4KB chunks) ---- */
+#define REMOTE_DIAG_OTA_BUF_SIZE   4096
 
 /* ---- Fast loop alive threshold ----
  * fast_alive = true if last runtime_stats_record() was within this many ms.

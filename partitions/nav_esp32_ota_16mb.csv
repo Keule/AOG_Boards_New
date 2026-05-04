@@ -1,18 +1,8 @@
-# ESP32 16 MB Flash — OTA Partition Table (AOG ESP Multiboard NAV)
+# AOG ESP Multiboard — 16MB Flash OTA Partition Table
+# Task: 013_REMOTE_MAINTENANCE-002-NAV-OTA-PARTITIONING
 #
-# Standard ESP-IDF layout:
-#   0x0000  Bootloader (not in table)
-#   0x8000  Partition table (3 KB, auto-generated)
-#   0x9000  NVS (16 KB)
-#   0xD000  OTA data (8 KB)
-#   0xF000  PHY init data (4 KB)
-#   0x10000 Factory app (3 MB)
-#   0x310000  OTA slot 0 (3 MB)
-#   0x610000  OTA slot 1 (3 MB)
-#   0x910000  SPIFFS (7168 KB)
-#   0xFF8000  Core dump (32 KB)
-#
-# Total checked: 0x1000000 = 16 MB ✓
+# Layout: factory (USB-Flash) + ota_0/ota_1 (OTA) + spiffs + coredump
+# ota_0/ota_1 each 3 MB — sufficient for current firmware (~500KB)
 #
 # Name,    Type,   SubType,  Offset,   Size,      Flags
 nvs,       data,   nvs,      0x9000,   0x4000,

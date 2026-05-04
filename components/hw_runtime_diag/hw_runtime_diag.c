@@ -17,6 +17,8 @@
  *   WP-H:   NTRIP status diagnostics (config_ready, state, no secrets)
  * ======================================================================== */
 
+#pragma GCC diagnostic ignored "-Wformat"
+
 #include "hw_runtime_diag.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -34,7 +36,7 @@
 #include "transport_tcp.h"
 #include "nmea_parser.h"
 
-static const char* TAG = "HW_DIAG";
+/* static const char* TAG unused — logs use inline string literals */
 
 /* ---- GNSS fix quality name lookup ---- */
 static const char* fix_quality_name(uint8_t fq)
@@ -72,7 +74,8 @@ static const char* last_sentence_type(const gnss_um980_t* gnss)
     return "GGA";
 }
 
-/* ---- WP-D: Saturated subtraction for checksum_ok ---- */
+/* saturated_sub — keep for future use */
+static uint32_t saturated_sub(uint32_t a, uint32_t b) __attribute__((unused));
 static uint32_t saturated_sub(uint32_t a, uint32_t b)
 {
     return (a >= b) ? (a - b) : 0;
@@ -441,9 +444,9 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         const aog_nav_app_t* app = (const aog_nav_app_t*)diag->nav_app;
         if (app != NULL) {
             ESP_LOGI("HW_DIAG",
-                     "AOG_NAV: pgn214_tx=%u cycle=%u state=%s",
-                     app->pgn214_send_count,
-                     app->cycle_count,
+                     "AOG_NAV: pgn214_tx=%lu cycle=%lu state=%s",
+                     (unsigned long)app->pgn214_send_count,
+                     (unsigned long)app->cycle_count,
                      (app->output_state == AOG_OUTPUT_OK) ? "OK" :
                      (app->output_state == AOG_OUTPUT_GNSS_INVALID) ? "GNSS_INVALID" :
                      (app->output_state == AOG_OUTPUT_GNSS_STALE) ? "GNSS_STALE" :
@@ -543,6 +546,7 @@ ntrip_cfg_log:
             /* Per-output counters (max 2 outputs) */
             uint32_t out1_fwd = 0, out1_drop = 0;
             uint32_t out2_fwd = 0, out2_drop = 0;
+            (void)out1_drop; (void)out2_drop;
 
             if (router->output_count >= 1) {
                 out1_fwd  = router->outputs[0].bytes_forwarded;

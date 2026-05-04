@@ -207,7 +207,7 @@ static hal_err_t esp32_eth_init_real(void)
     phy_config.reset_gpio_num = (pins.reset_pin >= 0) ? pins.reset_pin : -1;
     /* Use auto PHY address detection if board says 0 */
 
-    esp_eth_phy_t *phy = esp_eth_phy_new_generic(&phy_config);
+    esp_eth_phy_t *phy = esp_eth_phy_new_rtl8201(&phy_config);
     if (phy == NULL) {
         ESP_LOGE(TAG, "ETH_ERROR: phy_create_failed");
         mac->del(mac);
