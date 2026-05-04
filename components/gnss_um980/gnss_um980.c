@@ -32,51 +32,47 @@ static void gnss_um980_rebuild_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
 
     /* ---- Update position from GGA ---- */
     if (rx->gga_dirty && rx->gga_valid) {
-        snap->latitude    = rx->gga.latitude;
-        snap->longitude   = rx->gga.longitude;
-        snap->altitude    = rx->gga.altitude;
-        snap->satellites  = rx->gga.num_sats;
-        snap->hdop        = rx->gga.hdop;
-        snap->fix_quality = gnss_fix_quality_from_gga(rx->gga.fix_quality);
-        snap->rtk_status  = gnss_rtk_status_from_gga(rx->gga.fix_quality);
-        snap->correction_age_valid = rx->gga.age_diff_valid;
-        snap->correction_age_s     = rx->gga.age_diff_valid ? rx->gga.age_diff : 0.0;
         snap->last_gga_time_ms = timestamp_ms;
 
-        /* Position validity depends on fix quality */
         if (gga_has_valid_fix(&rx->gga)) {
+            /* GOOD GGA: update position data AND set valid */
+            snap->latitude    = rx->gga.latitude;
+            snap->longitude   = rx->gga.longitude;
+            snap->altitude    = rx->gga.altitude;
+            snap->satellites  = rx->gga.num_sats;
+            snap->hdop        = rx->gga.hdop;
+            snap->fix_quality = gnss_fix_quality_from_gga(rx->gga.fix_quality);
+            snap->rtk_status  = gnss_rtk_status_from_gga(rx->gga.fix_quality);
+            snap->correction_age_valid = rx->gga.age_diff_valid;
+            snap->correction_age_s     = rx->gga.age_diff_valid ? rx->gga.age_diff : 0.0;
+            snap->last_valid_gga_time_ms = timestamp_ms;
             snap->position_valid = true;
             snap->status_reason = GNSS_REASON_NONE;
-        } else {
-            snap->position_valid = false;
-            if (rx->gga.fix_quality == 0) {
-                snap->status_reason = GNSS_REASON_NO_FIX;
-            } else {
-                snap->status_reason = GNSS_REASON_UNKNOWN_FIX;
-            }
         }
+        /* BAD GGA (fix=0): update timestamp only, do NOT invalidate snapshot.
+         * Freshness timeout will eventually invalidate if no good GGA arrives. */
 
         rx->gga_dirty = false;
     }
 
     /* ---- Update motion from RMC ---- */
     if (rx->rmc_dirty && rx->rmc_valid) {
-        snap->speed_ms   = gnss_knots_to_ms(rx->rmc.speed_knots);
-        snap->course_deg = rx->rmc.course_true;
         snap->last_rmc_time_ms = timestamp_ms;
 
-        /* Motion validity requires RMC status A (active) */
         if (rx->rmc.status_valid) {
+            /* GOOD RMC (status A): update motion data AND set valid */
+            snap->speed_ms   = gnss_knots_to_ms(rx->rmc.speed_knots);
+            snap->course_deg = rx->rmc.course_true;
+            snap->last_valid_rmc_time_ms = timestamp_ms;
             snap->motion_valid = true;
             if (snap->status_reason == GNSS_REASON_NONE ||
                 snap->status_reason == GNSS_REASON_RMC_VOID ||
                 snap->status_reason == GNSS_REASON_NO_RMC) {
                 snap->status_reason = GNSS_REASON_NONE;
             }
-        } else {
-            snap->motion_valid = false;
-            snap->status_reason = GNSS_REASON_RMC_VOID;
         }
+        /* BAD RMC (status V): update timestamp only, do NOT invalidate snapshot.
+         * Freshness timeout will eventually invalidate if no good RMC arrives. */
 
         rx->rmc_dirty = false;
     }
@@ -211,6 +207,7 @@ uint32_t gnss_um980_feed(gnss_um980_t* rx, const uint8_t* data, size_t length)
                 break;
 
             default:
+                rx->unknown_prefix_count++;
                 break;
             }
             /* R2: Track last valid sentence type and timestamp */

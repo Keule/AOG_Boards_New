@@ -124,6 +124,11 @@ size_t transport_uart_tx_free(const transport_uart_t* uart);
 /* Get pointer to statistics (read-only access, valid as long as uart lives). */
 const transport_uart_stats_t* transport_uart_get_stats(const transport_uart_t* uart);
 
+/* Pump one cycle: TX ring buffer → HAL UART, HAL UART → RX ring buffer.
+ * Useful for boot-time or pre-runtime operations where the service loop
+ * has not yet started.  Non-blocking.  Safe to call at any time. */
+void transport_uart_pump(transport_uart_t* uart);
+
 /* Fill diagnostics struct. Returns HAL_OK on success. */
 hal_err_t transport_uart_diagnostics(const transport_uart_t* uart, transport_uart_diagnostics_t* diag);
 

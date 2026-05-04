@@ -11,7 +11,7 @@ set(APP_CORE_NAV_REQUIRES
     log feature_flags board_profiles runtime runtime_components
     hal_uart
     transport_uart transport_udp transport_tcp
-    gnss_um980 gnss_dual_heading
+    gnss_um980 gnss_dual_heading gnss_um980_control
     ntrip_client rtcm_router nav_rtcm_wiring
     aog_navigation_app
     nav_diagnostics

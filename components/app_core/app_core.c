@@ -29,6 +29,7 @@
 #include "remote_diag.h"
 #include "remote_log.h"
 #include "gnss_um980_snapshot.h"
+#include "gnss_um980_control.h"
 #endif
 
 /* ---- Steering subsystem includes ----
@@ -240,6 +241,9 @@ static gnss_dual_heading_calc_t s_heading;
 static ntrip_client_t  s_ntrip;
 static rtcm_router_t   s_rtcm_router;
 
+static gnss_um980_control_t s_primary_ctrl;     /* GNSS control: receiver 1 */
+static gnss_um980_control_t s_secondary_ctrl;   /* GNSS control: receiver 2 */
+
 static aog_nav_app_t   s_nav_app;
 
 /* NAV-HW-RUNTIME-DIAG-001: Periodic hardware diagnostics */
@@ -382,12 +386,21 @@ void app_core_init(void)
         gnss_um980_set_rx_source(&s_primary_gnss,   &s_primary_uart.rx_buffer);
         gnss_um980_set_rx_source(&s_secondary_gnss, &s_secondary_uart.rx_buffer);
 
-        /* --- UM980 Config Snapshot (NAV-UM980-CONFIG-SNAPSHOT-001) ---
-         * Query both receivers BEFORE NTRIP, RTCM, or normal GNSS operation.
+        /* --- GNSS control layer (NAV-REMOTE-GNSS-CMD-001) ---
+         * Must be initialized AFTER gnss_um980 and transport_uart,
+         * BEFORE snapshot and NTRIP/RTCM. */
+        gnss_um980_control_init(&s_primary_ctrl,   1, &s_primary_uart,   &s_primary_gnss);
+        gnss_um980_control_init(&s_secondary_ctrl, 2, &s_secondary_uart, &s_secondary_gnss);
+        gnss_um980_control_register(&s_primary_ctrl);
+        gnss_um980_control_register(&s_secondary_ctrl);
+
+        /* --- Boot-time UM980 config snapshot (NAV-UM980-CONFIG-SNAPSHOT-001) ---
+         * Queries both receivers BEFORE NTRIP, RTCM, or normal GNSS operation.
+         * Now uses gnss_um980_control for UART exclusive access.
          * Reads: version, config, mode, mask (read-only, no modifications).
          * Blocks ~10s total (2s settle + 2×4s query). On failure, boot continues. */
         gnss_um980_snapshot_init();
-        gnss_um980_snapshot_run_all(&s_primary_uart, &s_secondary_uart);
+        gnss_um980_snapshot_run_all();
 
         /* --- Dual heading --- */
         gnss_dual_heading_init(&s_heading);

@@ -130,6 +130,10 @@ typedef struct {
     uint64_t    last_rmc_time_ms;
     uint64_t    last_gst_time_ms;
 
+    /* ---- Timestamps of last VALID sentence (fix>0 / status A, 0 = never) ---- */
+    uint64_t    last_valid_gga_time_ms;
+    uint64_t    last_valid_rmc_time_ms;
+
     /* ---- Last error code for diagnostics ---- */
     gnss_error_code_t last_error;
 } gnss_snapshot_t;

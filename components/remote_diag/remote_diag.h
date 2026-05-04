@@ -8,21 +8,38 @@
  * 013_REMOTE_MAINTENANCE-002 additions:
  *   - /ota/status — OTA capability, partitions, last result
  *   - /ota        — POST firmware binary upload (raw body)
- *   - /reboot     — POST controlled reboot
+ *   - /reboot     — GET controlled reboot
+ *   - /           — GET index page with all endpoint links
  *   - Extended /status and /diag with OTA state fields
  *
  * NAV-REMOTE-LOG-001 additions:
  *   - /logs          — GET full log buffer (text/plain)
  *   - /logs?tail=N   — GET last N lines from ringbuffer
- *   - /logs/status   — GET JSON with buffer stats
+ *   - /logs/status   — GET JSON with buffer stats + boot-buffer info
  *   - /logs/clear    — POST clear the ringbuffer
  *   - /logs/view     — GET auto-refreshing HTML log viewer
+ *
+ * NAV-REMOTELOG-BOOTBUFFER-001 additions:
+ *   - Early-boot log capture before FreeRTOS scheduler
+ *   - /logs/status extended: early_init, fully_initialized,
+ *     boot_lines_captured, boot_bytes_captured
  *
  * NAV-UM980-CONFIG-SNAPSHOT-001 additions:
  *   - /gnss/config_snapshot  — GET combined snapshot (both receivers)
  *   - /gnss/1/config_snapshot — GET receiver 1 snapshot only
  *   - /gnss/2/config_snapshot — GET receiver 2 snapshot only
  *   - /gnss/config_status     — GET JSON snapshot status
+ *
+ * NAV-REMOTE-GNSS-CMD-001 additions:
+ *   - /gnss/1/send/<cmd>      — GET send command to receiver 1
+ *   - /gnss/2/send/<cmd>      — GET send command to receiver 2
+ *   - /gnss/1/config           — GET live config query (receiver 1)
+ *   - /gnss/2/config           — GET live config query (receiver 2)
+ *   - /gnss/config             — GET live config query (both receivers)
+ *   - /gnss/1/status           — GET control layer status (receiver 1)
+ *   - /gnss/2/status           — GET control layer status (receiver 2)
+ *   - /gnss/1/unlogall         — GET send UNLOGALL to receiver 1
+ *   - /gnss/2/unlogall         — GET send UNLOGALL to receiver 2
  *
  * HARD RULES:
  *   - No code in task_fast / Core 1
@@ -43,7 +60,7 @@ extern "C" {
 
 /* ---- HTTP server configuration ---- */
 #define REMOTE_DIAG_HTTP_PORT       80
-#define REMOTE_DIAG_MAX_URI_HANDLERS 16
+#define REMOTE_DIAG_MAX_URI_HANDLERS 28
 
 /* ---- OTA upload buffer size (4KB chunks) ---- */
 #define REMOTE_DIAG_OTA_BUF_SIZE   4096

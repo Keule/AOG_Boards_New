@@ -28,83 +28,59 @@ void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
                                    uint64_t current_ms,
                                    uint32_t timeout_ms)
 {
-    if (snap == NULL) {
-        return;
-    }
+    if (snap == NULL) return;
+    if (timeout_ms == 0) timeout_ms = GNSS_FRESHNESS_TIMEOUT_MS_DEFAULT;
 
-    /* Use default timeout if 0 */
-    if (timeout_ms == 0) {
-        timeout_ms = GNSS_FRESHNESS_TIMEOUT_MS_DEFAULT;
-    }
-
-    /* Check GGA freshness → can only INVALIDATE position_valid.
-     * Validation (setting true) is done by rebuild based on fix quality. */
-    if (snap->last_gga_time_ms == 0) {
-        /* No GGA ever received */
-        snap->position_valid = false;
-        if (snap->status_reason == GNSS_REASON_NONE) {
-            snap->status_reason = GNSS_REASON_NO_GGA;
+    /* ---- GGA freshness: use last VALID GGA (fix>0) for staleness ---- */
+    if (snap->last_valid_gga_time_ms == 0) {
+        /* No valid GGA ever received */
+        if (snap->position_valid) {
+            snap->position_valid = false;
+            if (snap->status_reason == GNSS_REASON_NONE) {
+                snap->status_reason = GNSS_REASON_NO_GGA;
+            }
         }
     } else {
-        uint64_t gga_age;
-        if (current_ms < snap->last_gga_time_ms) {
-            gga_age = 0;  /* clock wrap protection */
-        } else {
-            gga_age = current_ms - snap->last_gga_time_ms;
-        }
+        uint64_t gga_age = (current_ms > snap->last_valid_gga_time_ms)
+                           ? current_ms - snap->last_valid_gga_time_ms : 0;
         if (gga_age > timeout_ms) {
-            /* Stale → invalidate */
             snap->position_valid = false;
             snap->status_reason = GNSS_REASON_STALE_GGA;
         }
-        /* If fresh, leave position_valid as-is (set by rebuild) */
     }
 
-    /* Check RMC freshness → can only INVALIDATE motion_valid.
-     * Validation (setting true) is done by rebuild based on RMC status. */
-    if (snap->last_rmc_time_ms == 0) {
-        /* No RMC ever received */
-        snap->motion_valid = false;
-        if (snap->status_reason == GNSS_REASON_NONE) {
-            snap->status_reason = GNSS_REASON_NO_RMC;
+    /* ---- RMC freshness: use last VALID RMC (status A) for staleness ---- */
+    if (snap->last_valid_rmc_time_ms == 0) {
+        if (snap->motion_valid) {
+            snap->motion_valid = false;
+            if (snap->status_reason == GNSS_REASON_NONE) {
+                snap->status_reason = GNSS_REASON_NO_RMC;
+            }
         }
     } else {
-        uint64_t rmc_age;
-        if (current_ms < snap->last_rmc_time_ms) {
-            rmc_age = 0;  /* clock wrap protection */
-        } else {
-            rmc_age = current_ms - snap->last_rmc_time_ms;
-        }
+        uint64_t rmc_age = (current_ms > snap->last_valid_rmc_time_ms)
+                           ? current_ms - snap->last_valid_rmc_time_ms : 0;
         if (rmc_age > timeout_ms) {
-            /* Stale → invalidate */
             snap->motion_valid = false;
             if (snap->status_reason != GNSS_REASON_STALE_GGA) {
                 snap->status_reason = GNSS_REASON_STALE_RMC;
             }
         }
-        /* If fresh, leave motion_valid as-is (set by rebuild) */
     }
 
-    /* Check GST freshness → accuracy_valid (optional) */
-    if (snap->last_gst_time_ms == 0) {
-        snap->accuracy_valid = false;
-    } else {
-        uint64_t gst_age;
-        if (current_ms < snap->last_gst_time_ms) {
-            gst_age = 0;
-        } else {
-            gst_age = current_ms - snap->last_gst_time_ms;
-        }
+    /* ---- GST freshness ---- */
+    if (snap->last_gst_time_ms > 0) {
+        uint64_t gst_age = (current_ms > snap->last_gst_time_ms)
+                           ? current_ms - snap->last_gst_time_ms : 0;
         if (gst_age > timeout_ms) {
             snap->accuracy_valid = false;
         }
-        /* If fresh, leave accuracy_valid as-is (set by rebuild) */
     }
 
-    /* valid = position_valid AND motion_valid */
+    /* ---- Composite valid ---- */
     snap->valid = snap->position_valid && snap->motion_valid;
 
-    /* fresh = valid AND no staleness reasons */
+    /* ---- Fresh ---- */
     if (!snap->valid) {
         snap->fresh = false;
     } else {

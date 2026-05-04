@@ -168,6 +168,16 @@ const transport_uart_stats_t* transport_uart_get_stats(const transport_uart_t* u
     return &uart->stats;
 }
 
+void transport_uart_pump(transport_uart_t* uart)
+{
+    if (uart == NULL) {
+        return;
+    }
+    /* Delegate to service_step — safe because runtime_component_t is the first field.
+     * Timestamp 0 is harmless (not used by the UART transport). */
+    transport_uart_service_step(&uart->component, 0);
+}
+
 hal_err_t transport_uart_diagnostics(const transport_uart_t* uart, transport_uart_diagnostics_t* diag)
 {
     if (uart == NULL || diag == NULL) {

@@ -1,0 +1,64 @@
+PATCH NOTES — AOG_Boards_New-015 CONFIG SNAPSHOT
+================================================
+
+Task:      NAV-UM980-CONFIG-SNAPSHOT-001
+Date:      2025-05-04
+Build:     RAM 40.5% (132,616 B) | Flash 16.4% (515,300 B)
+Status:    0 errors, 0 warnings — SUCCESS
+
+SUMMARY
+-------
+Adds boot-time config snapshot for both UM980 GNSS receivers.
+Captures version, config, mode, mask via read-only UART commands
+before NTRIP/RTCM/runtime starts. Served via 4 new HTTP endpoints.
+
+CONTENTS
+--------
+NEW FILES (entire new component):
+  components/gnss_um980_snapshot/gnss_um980_snapshot.c     — Core snapshot logic
+  components/gnss_um980_snapshot/include/gnss_um980_snapshot.h — Public API, constants
+  components/gnss_um980_snapshot/CMakeLists.txt             — Build definition
+
+MODIFIED FILES:
+  components/remote_diag/remote_diag.c      — Added 4 HTTP handlers for snapshot endpoints
+  components/remote_diag/remote_diag.h      — Documented new endpoints in header comment
+  components/remote_diag/CMakeLists.txt     — Added gnss_um980_snapshot dependency
+  components/app_core/app_core.c            — Added snapshot init + run_all at boot
+  platformio.ini                             — Added gnss_um980_snapshot component
+  docs/testing/NAV-UM980-CONFIG-SNAPSHOT-001.md — Test documentation
+
+NEW HTTP ENDPOINTS:
+  GET /gnss/config_snapshot    — Combined text/plain (both receivers)
+  GET /gnss/1/config_snapshot  — Receiver 1 only
+  GET /gnss/2/config_snapshot  — Receiver 2 only
+  GET /gnss/config_status      — JSON status (completion, timeouts, bytes, duration)
+
+INSTALLATION
+------------
+1. Extract this ZIP into your project root (files merge into existing tree)
+2. The gnss_um980_snapshot/ directory is NEW — it will not overwrite anything
+3. Modified files (remote_diag, app_core, platformio.ini) should be reviewed
+   before overwriting your local copies
+4. Run: pio run -e nav_esp32_t_eth_lite
+5. Verify boot log shows: "Config Snapshot complete in ~10s"
+
+TESTING
+-------
+After flashing, check:
+  curl http://<BOARD_IP>/gnss/config_snapshot   — should show both receivers
+  curl http://<BOARD_IP>/gnss/config_status     — should show rx1_complete:true, rx2_complete:true
+
+SAFETY NOTES
+------------
+- Only READ-ONLY commands are sent (version, config, mode, mask)
+- NO unlog, saveconfig, freset, or mode changes
+- Snapshot runs BEFORE NTRIP connect and RTCM forwarding
+- On timeout/failure, boot continues normally (non-fatal)
+- Blocks boot for ~10 seconds total
+
+KNOWN LIMITS
+------------
+- Boot delay of ~10s (by design — must capture before runtime)
+- No retry on timeout
+- Static allocation (~64.5 KB RAM permanently reserved)
+- Single snapshot per boot (not updated at runtime)

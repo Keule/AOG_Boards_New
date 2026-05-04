@@ -57,13 +57,33 @@ static uint32_t snapshot_age_ms(const void* gnss_ptr)
     const gnss_um980_t* gnss = (const gnss_um980_t*)gnss_ptr;
     if (gnss == NULL) return 0;
 
-    /* Use GGA time as primary age indicator */
+    /* Use valid GGA time as primary age indicator */
     uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
-    if (gnss->snapshot.last_gga_time_ms > 0) {
-        uint64_t age = now_ms - gnss->snapshot.last_gga_time_ms;
+    uint64_t ref = gnss->snapshot.last_valid_gga_time_ms > 0
+                   ? gnss->snapshot.last_valid_gga_time_ms
+                   : gnss->snapshot.last_gga_time_ms;
+    if (ref > 0) {
+        uint64_t age = now_ms - ref;
         return (age > 0xFFFFFFFFUL) ? 0xFFFFFFFFUL : (uint32_t)age;
     }
     return 0;
+}
+
+/* ---- Snapshot last valid GGA/RMC age ---- */
+static uint32_t snapshot_valid_gga_age_ms(const gnss_um980_t* gnss)
+{
+    if (gnss == NULL || gnss->snapshot.last_valid_gga_time_ms == 0) return 0xFFFFFFFFUL;
+    uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    uint64_t age = now_ms - gnss->snapshot.last_valid_gga_time_ms;
+    return (age > 0xFFFFFFFFUL) ? 0xFFFFFFFFUL : (uint32_t)age;
+}
+
+static uint32_t snapshot_valid_rmc_age_ms(const gnss_um980_t* gnss)
+{
+    if (gnss == NULL || gnss->snapshot.last_valid_rmc_time_ms == 0) return 0xFFFFFFFFUL;
+    uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    uint64_t age = now_ms - gnss->snapshot.last_valid_rmc_time_ms;
+    return (age > 0xFFFFFFFFUL) ? 0xFFFFFFFFUL : (uint32_t)age;
 }
 
 /* ---- Determine last received sentence type from counters ---- */
@@ -217,13 +237,22 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         if (p_uart != NULL && p_gnss != NULL) {
             ESP_LOGI("HW_DIAG",
                      "GNSS_RX: primary uart=1 bytes=%u lines=%u "
-                     "csum_ok=%u csum_bad=%u binary_reject=%u garbage=%u last=%s",
+                     "gga=%u rmc=%u gst=%u gsa=%u gsv=%u unk=%u "
+                     "csum_bad=%u binary_reject=%u garbage=%u "
+                     "vGGA_age=%u vRMC_age=%u last=%s",
                      p_gnss->bytes_received,
                      p_gnss->sentences_parsed,
-                     p_gnss->sentences_parsed,
+                     p_gnss->gga_count,
+                     p_gnss->rmc_count,
+                     p_gnss->gst_count,
+                     p_gnss->gsa_count,
+                     p_gnss->gsv_count,
+                     p_gnss->unknown_prefix_count,
                      p_gnss->checksum_errors,
                      p_gnss->binary_rejects,
                      p_gnss->garbage_discarded,
+                     snapshot_valid_gga_age_ms(p_gnss),
+                     snapshot_valid_rmc_age_ms(p_gnss),
                      last_sentence_type(p_gnss));
         }
 
@@ -233,13 +262,22 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         if (s_uart != NULL && s_gnss != NULL) {
             ESP_LOGI("HW_DIAG",
                      "GNSS_RX: secondary uart=2 bytes=%u lines=%u "
-                     "csum_ok=%u csum_bad=%u binary_reject=%u garbage=%u last=%s",
+                     "gga=%u rmc=%u gst=%u gsa=%u gsv=%u unk=%u "
+                     "csum_bad=%u binary_reject=%u garbage=%u "
+                     "vGGA_age=%u vRMC_age=%u last=%s",
                      s_gnss->bytes_received,
                      s_gnss->sentences_parsed,
-                     s_gnss->sentences_parsed,
+                     s_gnss->gga_count,
+                     s_gnss->rmc_count,
+                     s_gnss->gst_count,
+                     s_gnss->gsa_count,
+                     s_gnss->gsv_count,
+                     s_gnss->unknown_prefix_count,
                      s_gnss->checksum_errors,
                      s_gnss->binary_rejects,
                      s_gnss->garbage_discarded,
+                     snapshot_valid_gga_age_ms(s_gnss),
+                     snapshot_valid_rmc_age_ms(s_gnss),
                      last_sentence_type(s_gnss));
         }
     }

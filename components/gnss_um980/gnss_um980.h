@@ -89,6 +89,7 @@ typedef struct {
     uint32_t gst_count;
     uint32_t gsa_count;             /* R2: GSA sentence counter */
     uint32_t gsv_count;             /* R2: GSV sentence counter */
+    uint32_t unknown_prefix_count;  /* Valid sentences with unrecognized prefix (NAV-GNSS-RUNTIME-FIX-001) */
 
     /* ---- Dirty flags (set in feed, cleared in rebuild) ---- */
     bool gga_dirty;

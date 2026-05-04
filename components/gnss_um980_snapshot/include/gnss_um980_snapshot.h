@@ -1,20 +1,26 @@
-#pragma once
-
 /* ========================================================================
  * gnss_um980_snapshot.h — UM980 Boot-Time Config Snapshot (NAV-UM980-CONFIG-SNAPSHOT-001)
  *
- * Queries both UM980 receivers at boot time (version, config, mode, mask)
- * and stores raw ASCII responses in static buffers for web access.
+ * Queries both UM980 receivers at boot time using the gnss_um980_control layer.
+ * Commands: UNLOGALL (optional), version, config, mode, mask
  *
- * Timing:
- *   - Receiver settle delay: 2000 ms after UART init
- *   - Command spacing:       300 ms between commands
- *   - Response timeout:      1500 ms per command
- *   - Total receiver budget: ~10 s
+ * Refactored for NAV-REMOTE-GNSS-CMD-001:
+ *   - Uses gnss_um980_control for all UART communication
+ *   - No direct transport_uart dependency
+ *   - Boot sequence: settle → (UNLOGALL) → query → (restore NMEA) → continue
  *
  * Memory:
  *   - 16 KB per receiver (statically allocated)
- *   - ~32 KB total static RAM cost
+ *   - ~33 KB total static RAM cost
+ *
+ * HTTP access (via remote_diag):
+ *   - /gnss/config_snapshot  — combined boot-time snapshot
+ *   - /gnss/1/config_snapshot — receiver 1 only
+ *   - /gnss/2/config_snapshot — receiver 2 only
+ *   - /gnss/config_status     — JSON status
+ *
+ * IMPORTANT: These show BOOT-TIME data. For live queries, use
+ * /gnss/1/send/VERSIONA via the gnss_um980_control HTTP interface.
  * ======================================================================== */
 
 #include <stddef.h>
@@ -28,20 +34,9 @@ extern "C" {
 /* ---- Configuration ---- */
 #define GNSS_SNAPSHOT_BUFFER_SIZE     16384   /* 16 KB per receiver */
 #define GNSS_SNAPSHOT_RX_COUNT        2
-#define GNSS_SNAPSHOT_CMDS            4       /* version, config, mode, mask */
 
 /* ---- Timing (ms) ---- */
 #define GNSS_SNAPSHOT_SETTLE_MS       2000
-#define GNSS_SNAPSHOT_CMD_SPACING_MS  300
-#define GNSS_SNAPSHOT_RESP_TIMEOUT_MS 1500
-
-/* ---- UM980 read-only commands (forbidden: unlog, saveconfig, freset, mode changes) ---- */
-static const char* const GNSS_SNAPSHOT_COMMANDS[GNSS_SNAPSHOT_CMDS] = {
-    "version\r\n",
-    "config\r\n",
-    "mode\r\n",
-    "mask\r\n"
-};
 
 /* ---- Status struct ---- */
 typedef struct {
@@ -56,59 +51,33 @@ typedef struct {
 
 /* ---- Public API ---- */
 
-/**
- * Initialize snapshot buffers. Must be called once before run_all().
- * Can be called multiple times safely (no-op after first init).
- */
+/** Initialize snapshot buffers. Call once before run_all(). */
 void gnss_um980_snapshot_init(void);
 
 /**
- * Run config snapshot on both receivers.
+ * Run config snapshot on both receivers using the gnss_um980_control layer.
  *
- * MUST be called AFTER UART transport is initialized but BEFORE
- * NTRIP connect, RTCM forwarding, and normal GNSS operation.
+ * MUST be called AFTER gnss_um980_control_init() and register().
+ * Sequence: settle → (UNLOGALL) → version/config/mode/mask → (restore NMEA)
+ * Blocks for ~10s. On failure, boot continues.
  *
- * Sequence:
- *   1. Wait for receiver settle (2s)
- *   2. Query receiver 1 (version, config, mode, mask)
- *   3. Query receiver 2 (version, config, mode, mask)
- *   4. Store raw ASCII responses
- *
- * This function blocks for ~10 seconds total (settle + 2 receivers).
- * On failure, system boot continues — does NOT abort.
- *
- * @param uart_primary   Pointer to primary transport_uart_t
- * @param uart_secondary Pointer to secondary transport_uart_t
- * @return true if both receivers responded, false if any timeout
+ * @return true if both receivers responded to all queries
  */
-bool gnss_um980_snapshot_run_all(void* uart_primary, void* uart_secondary);
+bool gnss_um980_snapshot_run_all(void);
 
-/**
- * Get raw ASCII snapshot for receiver 1.
- * @return Null-terminated string, or "NO SNAPSHOT DATA" if not available.
- */
+/** Get raw ASCII snapshot for receiver 1. */
 const char* gnss_um980_snapshot_get_receiver1(void);
 
-/**
- * Get raw ASCII snapshot for receiver 2.
- * @return Null-terminated string, or "NO SNAPSHOT DATA" if not available.
- */
+/** Get raw ASCII snapshot for receiver 2. */
 const char* gnss_um980_snapshot_get_receiver2(void);
 
-/**
- * Get combined snapshot (both receivers).
- * @return Null-terminated string with receiver 1 and 2 snapshots.
- */
+/** Get combined snapshot (both receivers). */
 const char* gnss_um980_snapshot_get_combined(void);
 
-/**
- * Check if snapshot has been completed.
- */
+/** Check if snapshot has been completed. */
 bool gnss_um980_snapshot_is_complete(void);
 
-/**
- * Get snapshot status (completion, timeouts, byte counts, duration).
- */
+/** Get snapshot status (completion, timeouts, byte counts, duration). */
 void gnss_um980_snapshot_get_status(gnss_um980_snapshot_status_t* out);
 
 #ifdef __cplusplus
