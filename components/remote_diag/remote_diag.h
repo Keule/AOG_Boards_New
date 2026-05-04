@@ -18,6 +18,12 @@
  *   - /logs/clear    — POST clear the ringbuffer
  *   - /logs/view     — GET auto-refreshing HTML log viewer
  *
+ * NAV-UM980-CONFIG-SNAPSHOT-001 additions:
+ *   - /gnss/config_snapshot  — GET combined snapshot (both receivers)
+ *   - /gnss/1/config_snapshot — GET receiver 1 snapshot only
+ *   - /gnss/2/config_snapshot — GET receiver 2 snapshot only
+ *   - /gnss/config_status     — GET JSON snapshot status
+ *
  * HARD RULES:
  *   - No code in task_fast / Core 1
  *   - HTTP server starts only after Ethernet link-up AND IP obtained
@@ -37,7 +43,7 @@ extern "C" {
 
 /* ---- HTTP server configuration ---- */
 #define REMOTE_DIAG_HTTP_PORT       80
-#define REMOTE_DIAG_MAX_URI_HANDLERS 12
+#define REMOTE_DIAG_MAX_URI_HANDLERS 16
 
 /* ---- OTA upload buffer size (4KB chunks) ---- */
 #define REMOTE_DIAG_OTA_BUF_SIZE   4096

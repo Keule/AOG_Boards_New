@@ -64,6 +64,7 @@
 
 /* ---- Remote log support (NAV-REMOTE-LOG-001) ---- */
 #include "remote_log.h"
+#include "gnss_um980_snapshot.h"
 #include <stdlib.h>
 
 static const char* TAG = "REMOTE_DIAG";
@@ -1093,6 +1094,65 @@ static esp_err_t logs_view_handler(httpd_req_t* req)
 }
 
 /* =================================================================
+ * GNSS Config Snapshot endpoints (NAV-UM980-CONFIG-SNAPSHOT-001)
+ * ================================================================= */
+
+static esp_err_t gnss_snapshot_handler(httpd_req_t* req)
+{
+    const char* data = gnss_um980_snapshot_get_combined();
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, data, strlen(data));
+    return ESP_OK;
+}
+
+static esp_err_t gnss_snapshot_rx1_handler(httpd_req_t* req)
+{
+    const char* data = gnss_um980_snapshot_get_receiver1();
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, data, strlen(data));
+    return ESP_OK;
+}
+
+static esp_err_t gnss_snapshot_rx2_handler(httpd_req_t* req)
+{
+    const char* data = gnss_um980_snapshot_get_receiver2();
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, data, strlen(data));
+    return ESP_OK;
+}
+
+static esp_err_t gnss_snapshot_status_handler(httpd_req_t* req)
+{
+    gnss_um980_snapshot_status_t st;
+    gnss_um980_snapshot_get_status(&st);
+
+    char buf[512];
+    int n = snprintf(buf, sizeof(buf),
+        "{\n"
+        "  \"complete\": %s,\n"
+        "  \"rx1_complete\": %s,\n"
+        "  \"rx2_complete\": %s,\n"
+        "  \"rx1_timeout\": %s,\n"
+        "  \"rx2_timeout\": %s,\n"
+        "  \"rx1_bytes\": %zu,\n"
+        "  \"rx2_bytes\": %zu,\n"
+        "  \"duration_ms\": %u\n"
+        "}\n",
+        gnss_um980_snapshot_is_complete() ? "true" : "false",
+        st.rx1_complete ? "true" : "false",
+        st.rx2_complete ? "true" : "false",
+        st.rx1_timeout ? "true" : "false",
+        st.rx2_timeout ? "true" : "false",
+        st.rx1_bytes,
+        st.rx2_bytes,
+        (unsigned)st.duration_ms);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, buf, (n > 0) ? (size_t)n : 0);
+    return ESP_OK;
+}
+
+/* =================================================================
  * Public API
  * ================================================================= */
 
@@ -1193,14 +1253,19 @@ void remote_diag_service_step(runtime_component_t* comp, uint64_t timestamp_us)
                 { .uri = "/logs/status",   .method = HTTP_GET,  .handler = logs_status_handler,   .user_ctx = NULL },
                 { .uri = "/logs/clear",    .method = HTTP_POST, .handler = logs_clear_handler,    .user_ctx = NULL },
                 { .uri = "/logs/view",     .method = HTTP_GET,  .handler = logs_view_handler,     .user_ctx = NULL },
+                /* NAV-UM980-CONFIG-SNAPSHOT-001: GNSS config snapshot endpoints */
+                { .uri = "/gnss/config_snapshot",  .method = HTTP_GET,  .handler = gnss_snapshot_handler,     .user_ctx = NULL },
+                { .uri = "/gnss/1/config_snapshot", .method = HTTP_GET,  .handler = gnss_snapshot_rx1_handler, .user_ctx = NULL },
+                { .uri = "/gnss/2/config_snapshot", .method = HTTP_GET,  .handler = gnss_snapshot_rx2_handler, .user_ctx = NULL },
+                { .uri = "/gnss/config_status",     .method = HTTP_GET,  .handler = gnss_snapshot_status_handler,.user_ctx = NULL },
             };
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 14; i++) {
                 httpd_register_uri_handler(server, &uris[i]);
             }
 
             diag->http_server = (void*)server;
             ESP_LOGI(TAG, "HTTP server started on port %d (ip=%s, %d endpoints)",
-                     REMOTE_DIAG_HTTP_PORT, ns.ip, 10);
+                     REMOTE_DIAG_HTTP_PORT, ns.ip, 14);
         } else {
             ESP_LOGE(TAG, "HTTP server start failed: 0x%x (%s)",
                      (unsigned)err, esp_err_to_name(err));

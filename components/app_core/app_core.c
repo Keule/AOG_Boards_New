@@ -28,6 +28,7 @@
 #include "nav_ntrip_config.h"
 #include "remote_diag.h"
 #include "remote_log.h"
+#include "gnss_um980_snapshot.h"
 #endif
 
 /* ---- Steering subsystem includes ----
@@ -380,6 +381,13 @@ void app_core_init(void)
         gnss_um980_init(&s_secondary_gnss, 1, "GNSS_SECONDARY");
         gnss_um980_set_rx_source(&s_primary_gnss,   &s_primary_uart.rx_buffer);
         gnss_um980_set_rx_source(&s_secondary_gnss, &s_secondary_uart.rx_buffer);
+
+        /* --- UM980 Config Snapshot (NAV-UM980-CONFIG-SNAPSHOT-001) ---
+         * Query both receivers BEFORE NTRIP, RTCM, or normal GNSS operation.
+         * Reads: version, config, mode, mask (read-only, no modifications).
+         * Blocks ~10s total (2s settle + 2×4s query). On failure, boot continues. */
+        gnss_um980_snapshot_init();
+        gnss_um980_snapshot_run_all(&s_primary_uart, &s_secondary_uart);
 
         /* --- Dual heading --- */
         gnss_dual_heading_init(&s_heading);

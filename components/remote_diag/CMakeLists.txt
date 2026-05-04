@@ -6,5 +6,5 @@ idf_component_register(
             transport_uart gnss_um980 gnss_snapshot gnss_dual_heading
             aog_navigation_app ntrip_client rtcm_router
             transport_udp board_profiles feature_flags hal_eth hal_ota
-            remote_log
+            remote_log gnss_um980_snapshot
 )
