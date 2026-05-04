@@ -1,0 +1,38 @@
+=== NAV-REMOTE-LOG-001: Remote Log Ringbuffer ===
+
+BUILD STATUS: SUCCESS (RAM 20.4%, Flash 16.3%)
+Fix: xSemaphoreTryTake → xSemaphoreTake(m, 0) für ESP-IDF 5.x Kompatibilität
+
+=== Dateien (DIFF ZIP) ===
+
+NEU: components/remote_log/
+  - include/remote_log.h        — Öffentliche API (init, read, tail, clear, stats)
+  - remote_log.c                — 32KB statischer Ringbuffer + vprintf Hook
+  - CMakeLists.txt              — ESP-IDF Komponente (REQUIRES log)
+
+GEÄNDERT: components/remote_diag/
+  - remote_diag.c               — 4 neue HTTP Handler (/logs, /logs/status, /logs/clear, /logs/view)
+  - remote_diag.h               — MAX_URI_HANDLERS 8→12, Endpoint-Doku
+  - CMakeLists.txt              — REQUIRES +remote_log
+
+GEÄNDERT: components/app_core/
+  - app_core.c                  — remote_log_init() nach HAL Init, vor Nav-Subsystemen
+
+GEÄNDERT: platformio.ini
+  - [env:native] lib_ignore += remote_log
+
+NEU: docs/testing/
+  - NAV-REMOTE-LOG-001.md       — Architektur-Dokumentation
+
+=== Patch-Anleitung ===
+1. Base: AOG_Boards_New-013_OTA-COMPLETE.zip entpacken
+2. Ordnerstruktur beibehalten (components/, docs/, etc.)
+3. Alle Dateien aus diesem ZIP an entsprechende Stelle kopieren
+4. pio run -e nav_esp32_t_eth_lite
+
+=== HTTP Endpunkte ===
+GET  /logs              — Kompletter Ringbuffer-Inhalt (text/plain)
+GET  /logs?tail=N       — Letzte N Zeilen (Standard: 50, Max: 500)
+GET  /logs/status       — JSON: lines_written, lines_dropped, bytes_written, bytes_overwritten, buffer_size, used_bytes
+POST /logs/clear        — Ringbuffer leeren (Statistiken werden zurückgesetzt)
+GET  /logs/view         — Auto-refresh HTML Log-Viewer (1s Intervall, tail=200)
