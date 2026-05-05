@@ -65,11 +65,9 @@ typedef struct {
     /* ---- Unified GNSS snapshot (merged from GGA+RMC+GST) ---- */
     gnss_snapshot_t snapshot;
 
-    /* ---- Position snapshot buffer (for downstream consumers) ----
-     * Publishes the full gnss_snapshot_t atomically via snapshot_buffer.
-     * Consumers (e.g., aog_navigation_app) read via snapshot_buffer_get(). */
-    gnss_snapshot_t    position_storage;    /* backing storage */
-    snapshot_buffer_t  position_snapshot;   /* atomic wrapper around storage */
+    /* ---- Position snapshot buffer (for consumers via snapshot_buffer API) ---- */
+    snapshot_buffer_t  position_snapshot;
+    nmea_gga_t         position_storage;
 
     /* ---- Freshness configuration ---- */
     uint32_t freshness_timeout_ms;
@@ -78,8 +76,6 @@ typedef struct {
     uint32_t sentences_parsed;     /* total valid sentences */
     uint32_t checksum_errors;      /* NMEA checksum mismatches */
     uint32_t overflow_errors;      /* sentence too long */
-    uint32_t binary_rejects;       /* non-printable byte in sentence (NAV-GNSS-NMEA-CORRUPTION-001) */
-    uint32_t garbage_discarded;    /* non-'$' bytes in IDLE state (RTCM binary) */
     uint32_t timeout_events;       /* freshness timeout count */
     uint32_t bytes_received;       /* total bytes fed */
 
@@ -87,21 +83,47 @@ typedef struct {
     uint32_t gga_count;
     uint32_t rmc_count;
     uint32_t gst_count;
-    uint32_t gsa_count;             /* R2: GSA sentence counter */
-    uint32_t gsv_count;             /* R2: GSV sentence counter */
-    uint32_t unknown_prefix_count;  /* Valid sentences with unrecognized prefix (NAV-GNSS-RUNTIME-FIX-001) */
+    uint32_t gsa_count;
+    uint32_t gsv_count;
 
     /* ---- Dirty flags (set in feed, cleared in rebuild) ---- */
     bool gga_dirty;
     bool rmc_dirty;
     bool gst_dirty;
 
+    /* ---- Last sentence tracking ---- */
+    nmea_sentence_type_t last_sentence_type;
+    uint64_t last_sentence_us;    /* timestamp (us) of last parsed sentence */
+
+    /* ---- NMEA rate measurement (sliding window) ---- */
+    struct {
+        uint32_t prev_counts[5];  /* index: 0=GGA 1=RMC 2=GST 3=GSA 4=GSV */
+        uint64_t prev_time_ms;
+        uint64_t curr_time_ms;
+        uint32_t window_ms;       /* measurement window in ms */
+        float    rates_hz[5];     /* per-sentence rate in Hz */
+        float    total_hz;        /* sum of all rates */
+        bool     warmup;          /* true until first full window */
+        uint8_t  sample_count;    /* number of completed windows */
+
+        /* Rate status flags */
+        bool     rate_high;           /* any rate above target */
+        bool     duplicate_suspected; /* total rate >> expected */
+        bool     gsv_active;          /* GSV rate > threshold */
+
+        /* Rate guard */
+        uint8_t  recovery_count;      /* auto-recovery attempts */
+        bool     recovery_attempted;  /* recovery triggered this boot */
+    } nmea_rate;
+
     /* ---- Timing ---- */
     uint64_t last_service_ms;      /* last service_step timestamp (ms) */
 
-    /* ---- R2: Last sentence tracking ---- */
-    uint64_t last_sentence_us;      /* timestamp of last valid sentence (us) */
-    uint32_t last_sentence_type;    /* nmea_sentence_type_t of last valid sentence */
+    /* ---- NMEA config intercept flag ----
+     * When true, gnss_nmea_config is intercepting the UART RX buffer.
+     * gnss_um980_service_step skips direct RX reads in this mode
+     * (gnss_nmea_config forwards NMEA data via gnss_um980_feed). */
+    bool nmea_config_intercept;
 } gnss_um980_t;
 
 /* ---- API ---- */
@@ -135,17 +157,8 @@ void gnss_um980_finalize_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms);
 
 /* Service step: consume bytes from rx_source, parse NMEA,
  * rebuild snapshot, check freshness.
- * Called by the runtime service loop (Core 0). */
+ * Called by the runtime service loop. */
 void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us);
-
-/* ---- Fast Path Hooks (NAV-FIX-001 AP-B) ----
- * Called from task_fast on Core 1 at 100 Hz.
- * fast_input:  consume bytes from rx_source, parse NMEA.
- * fast_process: rebuild snapshot if dirty, check freshness.
- * These allow GNSS processing at deterministic 100 Hz on Core 1. */
-
-void gnss_um980_fast_input(runtime_component_t* comp, const fast_cycle_context_t* ctx);
-void gnss_um980_fast_process(runtime_component_t* comp, const fast_cycle_context_t* ctx);
 
 /* Get pointer to latest GGA data. NULL if not valid. */
 const nmea_gga_t* gnss_um980_get_gga(const gnss_um980_t* rx);
@@ -160,16 +173,15 @@ const nmea_gst_t* gnss_um980_get_gst(const gnss_um980_t* rx);
  * Snapshot is rebuilt automatically in service_step(). */
 const gnss_snapshot_t* gnss_um980_get_snapshot(const gnss_um980_t* rx);
 
-/* Get pointer to the position snapshot buffer (for wiring to consumers).
- * Consumers read gnss_snapshot_t from this buffer via snapshot_buffer_get().
- * NULL if rx is NULL. */
-const snapshot_buffer_t* gnss_um980_get_position_snapshot(const gnss_um980_t* rx);
-
 /* Check if position data is valid (position_valid flag from snapshot). */
 bool gnss_um980_has_fix(const gnss_um980_t* rx);
 
 /* Check if snapshot is fresh (within timeout). */
 bool gnss_um980_is_fresh(const gnss_um980_t* rx);
+
+/* Get pointer to position snapshot buffer (for AOG nav app consumers).
+ * Returns NULL if rx is NULL. */
+const snapshot_buffer_t* gnss_um980_get_position_snapshot(const gnss_um980_t* rx);
 
 #ifdef __cplusplus
 }

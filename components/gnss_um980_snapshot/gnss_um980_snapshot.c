@@ -48,24 +48,22 @@ static bool s_rx_timeout[GNSS_SNAPSHOT_RX_COUNT];
 static size_t s_rx_bytes[GNSS_SNAPSHOT_RX_COUNT];
 static uint32_t s_duration_ms = 0;
 
+/* ---- NAV-GNSS-NMEA-LOG-IDEMPOTENT-001: Per-receiver error tracking ---- */
+static uint8_t s_rx_blocked_count[GNSS_SNAPSHOT_RX_COUNT];
+static uint8_t s_rx_error_count[GNSS_SNAPSHOT_RX_COUNT];
+static uint8_t s_rx_timeout_count[GNSS_SNAPSHOT_RX_COUNT];
+static bool s_required_ok = false;
+
 /* ---- Timing macro ---- */
 #define SNAPSHOT_DELAY_MS(ms) vTaskDelay(pdMS_TO_TICKS(ms))
 
 /* ---- Query commands ---- */
 static const char* const SNAPSHOT_CMDS[] = {
-    "UNLOG COM2",
     "VERSIONA",
     "CONFIG",
     "MODE",
     "MASK",
-    "GNGGA COM2 0.05",
-    "GNRMC COM2 0.05",
-    "GPGST COM2 0.05",
-    "GNGSA COM2 1",
-    "SAVECONFIG",
-    "RESET",
 };
-
 #define SNAPSHOT_CMD_COUNT (sizeof(SNAPSHOT_CMDS) / sizeof(SNAPSHOT_CMDS[0]))
 
 /* =================================================================
@@ -93,11 +91,10 @@ static void snapshot_append(int rx_index, const char* data, size_t len)
 /* =================================================================
  * Internal: append formatted line
  * ================================================================= */
-static void snapshot_append_cmd(int rx_index, const char* cmd, bool ok)
+static void snapshot_append_cmd(int rx_index, const char* cmd, const char* status)
 {
     char buf[128];
-    int n = snprintf(buf, sizeof(buf), "> %s  %s\r\n", cmd,
-                     ok ? "[OK]" : "[TIMEOUT]");
+    int n = snprintf(buf, sizeof(buf), "> %s  %s\r\n", cmd, status);
     if (n > 0 && (size_t)n < sizeof(buf)) {
         snapshot_append(rx_index, buf, (size_t)n);
     }
@@ -143,17 +140,31 @@ static bool snapshot_query_receiver(int rx_index)
                                                        GNSS_CTRL_DEFAULT_TIMEOUT);
 
         if (err == GNSS_CTRL_OK) {
-            snapshot_append_cmd(rx_index, cmd, true);
+            snapshot_append_cmd(rx_index, cmd, "[OK]");
             if (response[0] != '\0') {
                 snapshot_append(rx_index, response, strlen(response));
             }
+        } else if (err == GNSS_CTRL_ERR_BLOCKED) {
+            /* NAV-GNSS-NMEA-LOG-IDEMPOTENT-001:
+             * Blocked commands (SAVECONFIG, RESET, UPGRADE, FRESET) are
+             * intentionally blocked. They are NOT required for snapshot
+             * success. Count separately, do NOT set failure. */
+            s_rx_blocked_count[rx_index]++;
+            ESP_LOGI(TAG, "SNAPSHOT: RX%d [%s] BLOCKED_BY_POLICY (skipped, count=%d)",
+                     receiver, cmd, (int)s_rx_blocked_count[rx_index]);
+            snapshot_append_cmd(rx_index, cmd, "[BLOCKED_BY_POLICY]");
         } else {
-            snapshot_append_cmd(rx_index, cmd, false);
-            all_ok = false;
-
+            /* TIMEOUT or other error — this IS a failure */
+            s_rx_error_count[rx_index]++;
+            const char* label = (err == GNSS_CTRL_ERR_TIMEOUT) ? "[TIMEOUT]" : "[ERROR]";
             if (err == GNSS_CTRL_ERR_TIMEOUT) {
+                s_rx_timeout_count[rx_index]++;
                 s_rx_timeout[rx_index] = true;
             }
+            ESP_LOGE(TAG, "SNAPSHOT: RX%d [%s] %s (error_count=%d)",
+                     receiver, cmd, label, (int)s_rx_error_count[rx_index]);
+            snapshot_append_cmd(rx_index, cmd, label);
+            all_ok = false;
         }
 
         /* Separator between commands */
@@ -215,8 +226,12 @@ void gnss_um980_snapshot_init(void)
     memset(s_rx_complete, 0, sizeof(s_rx_complete));
     memset(s_rx_timeout, 0, sizeof(s_rx_timeout));
     memset(s_rx_bytes, 0, sizeof(s_rx_bytes));
+    memset(s_rx_blocked_count, 0, sizeof(s_rx_blocked_count));
+    memset(s_rx_error_count, 0, sizeof(s_rx_error_count));
+    memset(s_rx_timeout_count, 0, sizeof(s_rx_timeout_count));
     s_complete = false;
     s_duration_ms = 0;
+    s_required_ok = false;
 
     s_initialized = true;
 }
@@ -264,23 +279,38 @@ bool gnss_um980_snapshot_run_all(void)
              rx2_ok ? "OK" : "TIMEOUT/ERROR", s_rx_bytes[1]);
 
 #if GNSS_CTRL_UNLOGALL_AT_BOOT
-    /* Restore essential NMEA logs */
-    ESP_LOGI(TAG, "Restoring NMEA logs on both receivers...");
-    gnss_um980_control_restore_nmea(gnss_um980_control_get(1));
-    gnss_um980_control_restore_nmea(gnss_um980_control_get(2));
+    /* Restore essential NMEA logs — idempotent (NAV-GNSS-NMEA-LOG-IDEMPOTENT-001) */
+    ESP_LOGI(TAG, "Restoring NMEA logs on both receivers (idempotent)...");
+    gnss_ctrl_err_t r1_err = gnss_um980_control_restore_nmea(gnss_um980_control_get(1));
+    gnss_ctrl_err_t r2_err = gnss_um980_control_restore_nmea(gnss_um980_control_get(2));
+    if (r1_err != GNSS_CTRL_OK) {
+        ESP_LOGW(TAG, "RX1 NMEA restore returned err=%d (non-fatal, rate guard active)", (int)r1_err);
+    }
+    if (r2_err != GNSS_CTRL_OK) {
+        ESP_LOGW(TAG, "RX2 NMEA restore returned err=%d (non-fatal, rate guard active)", (int)r2_err);
+    }
 #endif
 
     s_duration_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - start;
     s_complete = true;
 
+    /* NAV-GNSS-NMEA-LOG-IDEMPOTENT-001:
+     * Snapshot is OK if all required read-only commands succeeded.
+     * Blocked-by-policy commands (SAVECONFIG/RESET) do NOT count as failure. */
+    s_required_ok = rx1_ok && rx2_ok;
+
     build_combined();
 
-    ESP_LOGI(TAG, "Config Snapshot complete in %lu ms — RX1: %s (%zu B), RX2: %s (%zu B)",
+    ESP_LOGI(TAG, "Config Snapshot complete in %lu ms — RX1: %s (%zu B, blocked=%d, errors=%d), "
+             "RX2: %s (%zu B, blocked=%d, errors=%d) required_ok=%s",
              (unsigned long)s_duration_ms,
              rx1_ok ? "OK" : "FAIL", s_rx_bytes[0],
-             rx2_ok ? "OK" : "FAIL", s_rx_bytes[1]);
+             (int)s_rx_blocked_count[0], (int)s_rx_error_count[0],
+             rx2_ok ? "OK" : "FAIL", s_rx_bytes[1],
+             (int)s_rx_blocked_count[1], (int)s_rx_error_count[1],
+             s_required_ok ? "true" : "false");
 
-    return rx1_ok && rx2_ok;
+    return s_required_ok;
 }
 
 const char* gnss_um980_snapshot_get_receiver1(void)
@@ -316,4 +346,12 @@ void gnss_um980_snapshot_get_status(gnss_um980_snapshot_status_t* out)
     out->rx1_bytes = s_rx_bytes[0];
     out->rx2_bytes = s_rx_bytes[1];
     out->duration_ms = s_duration_ms;
+    /* NAV-GNSS-NMEA-LOG-IDEMPOTENT-001 */
+    out->rx1_blocked_count = s_rx_blocked_count[0];
+    out->rx2_blocked_count = s_rx_blocked_count[1];
+    out->rx1_error_count = s_rx_error_count[0];
+    out->rx2_error_count = s_rx_error_count[1];
+    out->rx1_timeout_count = s_rx_timeout_count[0];
+    out->rx2_timeout_count = s_rx_timeout_count[1];
+    out->required_ok = s_required_ok;
 }

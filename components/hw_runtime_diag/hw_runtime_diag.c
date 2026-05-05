@@ -282,6 +282,44 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         }
     }
 
+    /* ---- NAV-GNSS-NMEA-LOG-IDEMPOTENT-001: NMEA Rate Diagnostics ---- */
+    {
+        const gnss_um980_t* gnss_rate_arr[2] = {
+            (const gnss_um980_t*)diag->primary_gnss,
+            (const gnss_um980_t*)diag->secondary_gnss
+        };
+        const char* rate_labels[2] = { "primary", "secondary" };
+
+        for (int ri = 0; ri < 2; ri++) {
+            const gnss_um980_t* rg = gnss_rate_arr[ri];
+            if (rg == NULL) continue;
+
+            /* Only log if rates have been computed (window_start > 0) */
+            if (rg->rate_window_start_ms == 0) continue;
+
+            const transport_uart_t* rate_uart = (ri == 0)
+                ? (const transport_uart_t*)diag->primary_uart
+                : (const transport_uart_t*)diag->secondary_uart;
+            const transport_uart_stats_t* rate_us = (rate_uart != NULL) ? transport_uart_get_stats(rate_uart) : NULL;
+            uint32_t rx_over_per_s = (rate_us != NULL) ? rate_us->rx_overruns_per_s : 0;
+
+            ESP_LOGI("HW_DIAG",
+                     "GNSS_NMEA_RATE: %s gga=%u.%02u rmc=%u.%02u gst=%u.%02u "
+                     "gsa=%u.%02u gsv=%u.%02u total=%u.%02u/s bytes=%u/s "
+                     "status=%s uart_overruns_per_s=%u",
+                     rate_labels[ri],
+                     (unsigned)(rg->rate_gga_hz_x100 / 100), (unsigned)(rg->rate_gga_hz_x100 % 100),
+                     (unsigned)(rg->rate_rmc_hz_x100 / 100), (unsigned)(rg->rate_rmc_hz_x100 % 100),
+                     (unsigned)(rg->rate_gst_hz_x100 / 100), (unsigned)(rg->rate_gst_hz_x100 % 100),
+                     (unsigned)(rg->rate_gsa_hz_x100 / 100), (unsigned)(rg->rate_gsa_hz_x100 % 100),
+                     (unsigned)(rg->rate_gsv_hz_x100 / 100), (unsigned)(rg->rate_gsv_hz_x100 % 100),
+                     (unsigned)(rg->rate_total_hz_x100 / 100), (unsigned)(rg->rate_total_hz_x100 % 100),
+                     (unsigned)rg->rate_bytes_per_sec,
+                     gnss_um980_rate_status_str(rg),
+                     (unsigned)rx_over_per_s);
+        }
+    }
+
     /* ---- NAV-GNSS-NMEA-CORRUPTION-001: GNSS UART Buffer Diagnostics (WP-D) ---- */
     {
         const transport_uart_t* p_uart = (const transport_uart_t*)diag->primary_uart;

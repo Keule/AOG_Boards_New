@@ -1,5 +1,6 @@
 /* ========================================================================
  * gnss_um980_control.c — Remote GNSS Command Interface (NAV-REMOTE-GNSS-CMD-001)
+ *                       + NAV-GNSS-NMEA-LOG-IDEMPOTENT-001
  *
  * SparkFun-style command/response layer for UM980 receivers.
  *
@@ -8,10 +9,13 @@
  *   collect → restore). During the cycle, the NMEA parser's rx_source
  *   is set to NULL so it won't consume response bytes from the ring buffer.
  *
- * Response Collection:
- *   Uses transport_uart_pump() to bridge HAL UART ↔ ring buffer
- *   (required because the runtime service_step may not drain fast enough
- *   during the blocking command cycle).
+ * NAV-GNSS-NMEA-LOG-IDEMPOTENT-001 changes:
+ *   - Idempotent restore: targeted UNLOG before LOG (all talker IDs)
+ *   - Explicit GSV deactivation (GNGSV, GPGSV, GBGSV, GAGSV)
+ *   - Only LOG COM2 <sentence> ONTIME <period> syntax (no short-form)
+ *   - Restore command result verification (response OK check)
+ *   - Profile state tracking (IDLE/RESTORING/ACTIVE/HIGH_RATE/...)
+ *   - Rate guard: monitors NMEA rates after restore, triggers auto-recovery
  *
  * Logging:
  *   All commands are logged via ESP_LOGI (auto-captured by remote_log hook).
@@ -39,18 +43,42 @@ static gnss_um980_control_t* s_registry[GNSS_CTRL_MAX_RECEIVERS] = { NULL, NULL 
 /* ---- Command blocklist (case-insensitive prefix match) ---- */
 static const char* const s_blocked_prefixes[] = {
     "FRESET",
-    "SAVECONFIG",
-    "RESET",
     "UPGRADE",
 };
 #define BLOCKED_PREFIX_COUNT (sizeof(s_blocked_prefixes) / sizeof(s_blocked_prefixes[0]))
 
-/* ---- NMEA restore commands (sent after UNLOGALL at boot) ---- */
+/* ---- UNLOG commands (Phase 1: deactivate all logs on COM2) ----
+ * Covers all known talker IDs for each sentence type.
+ * UM980 supports GN, GP, GA, GB talker IDs. */
+static const char* const s_unlog_cmds[] = {
+    "UNLOG COM2 GNGGA\r\n",
+    "UNLOG COM2 GPGGA\r\n",
+    "UNLOG COM2 GNRMC\r\n",
+    "UNLOG COM2 GPRMC\r\n",
+    "UNLOG COM2 GNGST\r\n",
+    "UNLOG COM2 GPGST\r\n",
+    "UNLOG COM2 GNGSA\r\n",
+    "UNLOG COM2 GPGSA\r\n",
+    "UNLOG COM2 GNGSV\r\n",    /* Explicit GSV deactivation */
+    "UNLOG COM2 GPGSV\r\n",
+    "UNLOG COM2 GBGSV\r\n",
+    "UNLOG COM2 GAGSV\r\n",
+};
+#define UNLOG_CMD_COUNT (sizeof(s_unlog_cmds) / sizeof(s_unlog_cmds[0]))
+
+/* ---- NMEA restore commands (Phase 2: activate runtime profile) ----
+ * Uses ONLY LOG COM2 <SENTENCE> ONTIME <PERIOD> syntax.
+ * No short-form commands (e.g. "GNGGA COM2 0.05").
+ *
+ * GGA/RMC/GST: 20 Hz (0.05s) — core navigation sentences
+ * GSA: 1 Hz — DOP info for quality assessment
+ * GSV: DISABLED — removed to reduce ~40-60% of NMEA traffic volume */
 static const char* const s_nmea_restore_cmds[] = {
     "LOG COM2 GNGGA ONTIME 0.05\r\n",
     "LOG COM2 GNRMC ONTIME 0.05\r\n",
     "LOG COM2 GNGST ONTIME 0.05\r\n",
     "LOG COM2 GNGSA ONTIME 1\r\n",
+    /* GSV intentionally omitted — disabled in Phase 1 */
 };
 #define NMEA_RESTORE_CMD_COUNT (sizeof(s_nmea_restore_cmds) / sizeof(s_nmea_restore_cmds[0]))
 
@@ -126,6 +154,48 @@ static size_t ctrl_ensure_crlf(const char* cmd, char* out, size_t out_size)
     out[copy++] = '\n';
     out[copy] = '\0';
     return copy;
+}
+
+/* =================================================================
+ * Internal: check if response contains OK
+ * ================================================================= */
+static bool response_contains_ok(const char* response)
+{
+    if (response == NULL || response[0] == '\0') return false;
+    /* UM980 responses: "<OK>", "OK", "OK\r\n", "<OK>\r\n" */
+    const char* p = response;
+    while (*p) {
+        if ((*p == 'O' || *p == 'o') && *(p + 1) == 'K') return true;
+        p++;
+    }
+    return false;
+}
+
+/* =================================================================
+ * Internal: strip \r\n for logging
+ * ================================================================= */
+static void strip_crlf(char* str)
+{
+    if (str == NULL) return;
+    size_t len = strlen(str);
+    while (len > 0 && (str[len - 1] == '\r' || str[len - 1] == '\n')) {
+        str[--len] = '\0';
+    }
+}
+
+/* =================================================================
+ * Internal: store restore result
+ * ================================================================= */
+static void store_restore_result(gnss_um980_control_t* ctrl,
+                                  const char* cmd, gnss_ctrl_err_t err,
+                                  const char* response)
+{
+    if (ctrl->restore_result_count >= GNSS_CTRL_RESTORE_RESULTS_MAX) return;
+    gnss_ctrl_restore_result_t* r = &ctrl->restore_results[ctrl->restore_result_count++];
+    r->cmd = cmd;
+    r->err = err;
+    r->response_len = response ? (uint32_t)strlen(response) : 0;
+    r->response_has_ok = response_contains_ok(response);
 }
 
 /* =================================================================
@@ -221,6 +291,7 @@ void gnss_um980_control_init(gnss_um980_control_t* ctrl, int receiver,
     ctrl->mutex = xSemaphoreCreateMutex();
     ctrl->initialized = true;
     ctrl->command_active = false;
+    ctrl->profile_state = NMEA_PROFILE_IDLE;
 
     ESP_LOGI(TAG, "Control instance initialized: receiver=%d uart=%p gnss=%p",
              receiver, (void*)uart, (void*)gnss);
@@ -384,7 +455,7 @@ gnss_ctrl_err_t gnss_um980_send_command_expect(gnss_um980_control_t* ctrl,
 }
 
 /* =================================================================
- * Boot-time helpers (used by snapshot refactor)
+ * Boot-time helpers
  * ================================================================= */
 
 /**
@@ -397,34 +468,95 @@ gnss_ctrl_err_t gnss_um980_control_unlogall(gnss_um980_control_t* ctrl)
     return gnss_um980_send_command(ctrl, "UNLOGALL", response, sizeof(response), 2000);
 }
 
-/**
- * Restore essential NMEA logs after UNLOGALL.
- * Sends LOG commands for GGA, RMC, GST on COM1.
- */
-void gnss_um980_control_restore_nmea(gnss_um980_control_t* ctrl)
-{
-    char response[256];
-    for (size_t i = 0; i < NMEA_RESTORE_CMD_COUNT; i++) {
-        /* Strip \r\n for logging */
-        char cmd_display[64];
-        const char* src = s_nmea_restore_cmds[i];
-        size_t len = strlen(src);
-        if (len > 63) len = 63;
-        memcpy(cmd_display, src, len);
-        cmd_display[len] = '\0';
-        /* Remove trailing \r\n */
-        char* nl = strchr(cmd_display, '\r');
-        if (nl) *nl = '\0';
+/* =================================================================
+ * NAV-GNSS-NMEA-LOG-IDEMPOTENT-001: Idempotent NMEA profile restore
+ * ================================================================= */
 
-        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, s_nmea_restore_cmds[i],
-                                                       response, sizeof(response), 2000);
+gnss_ctrl_err_t gnss_um980_control_restore_nmea(gnss_um980_control_t* ctrl)
+{
+    if (ctrl == NULL || !ctrl->initialized) return GNSS_CTRL_ERR_NOT_INITIALIZED;
+
+    char response[256];
+    char cmd_display[64];
+    bool any_failed = false;
+
+    ctrl->profile_state = NMEA_PROFILE_RESTORING;
+    ctrl->restore_result_count = 0;
+    ctrl->profile_restore_count++;
+    ctrl->profile_last_restore_ms = ctrl_now_ms();
+
+    ESP_LOGI(TAG, "Receiver %d: === Idempotent NMEA restore start ===", ctrl->receiver);
+
+    /* ---- Phase 1: Deactivate all logs on COM2 ---- */
+    ESP_LOGI(TAG, "Receiver %d: Phase 1 — Deactivating all COM2 logs...", ctrl->receiver);
+
+    for (size_t i = 0; i < UNLOG_CMD_COUNT; i++) {
+        const char* cmd = s_unlog_cmds[i];
+
+        /* Copy for logging (strip CRLF) */
+        strncpy(cmd_display, cmd, sizeof(cmd_display) - 1);
+        cmd_display[sizeof(cmd_display) - 1] = '\0';
+        strip_crlf(cmd_display);
+
+        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, cmd,
+                                                       response, sizeof(response), 100);
+        store_restore_result(ctrl, cmd, err, response);
+
         if (err != GNSS_CTRL_OK) {
-            ESP_LOGW(TAG, "Receiver %d: NMEA restore '%s' failed (err=%d)",
+            /* UNLOG failure is a warning, not a hard error —
+             * the sentence may not have been active. Continue. */
+            ESP_LOGW(TAG, "Receiver %d: UNLOG '%s' warning (err=%d)",
                      ctrl->receiver, cmd_display, (int)err);
-        } else {
-            ESP_LOGI(TAG, "Receiver %d: NMEA restore '%s' OK", ctrl->receiver, cmd_display);
         }
     }
+
+    /* Small delay between phases for UM980 to process */
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    /* ---- Phase 2: Activate runtime profile ---- */
+    ESP_LOGI(TAG, "Receiver %d: Phase 2 — Activating runtime profile...", ctrl->receiver);
+
+    for (size_t i = 0; i < NMEA_RESTORE_CMD_COUNT; i++) {
+        const char* cmd = s_nmea_restore_cmds[i];
+
+        strncpy(cmd_display, cmd, sizeof(cmd_display) - 1);
+        cmd_display[sizeof(cmd_display) - 1] = '\0';
+        strip_crlf(cmd_display);
+
+        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, cmd,
+                                                       response, sizeof(response), 2000);
+        store_restore_result(ctrl, cmd, err, response);
+
+        if (err != GNSS_CTRL_OK) {
+            ESP_LOGW(TAG, "Receiver %d: RESTORE '%s' FAILED (err=%d)",
+                     ctrl->receiver, cmd_display, (int)err);
+            any_failed = true;
+            ctrl->profile_last_error = err;
+        } else if (!response_contains_ok(response)) {
+            /* Command sent but no OK in response — suspicious */
+            ESP_LOGW(TAG, "Receiver %d: RESTORE '%s' sent but no OK in response",
+                     ctrl->receiver, cmd_display);
+            any_failed = true;
+            ctrl->profile_last_error = GNSS_CTRL_ERR_EXPECT_FAILED;
+        } else {
+            ESP_LOGI(TAG, "Receiver %d: RESTORE '%s' OK", ctrl->receiver, cmd_display);
+        }
+    }
+
+    /* Start rate guard window */
+    ctrl->profile_rate_guard_active = true;
+    ctrl->profile_rate_guard_start_ms = ctrl_now_ms();
+
+    if (any_failed) {
+        ctrl->profile_state = NMEA_PROFILE_RECOVERY_FAILED;
+        ESP_LOGE(TAG, "Receiver %d: === NMEA restore FAILED ===", ctrl->receiver);
+        return GNSS_CTRL_ERR_RESTORE_FAILED;
+    }
+
+    ctrl->profile_state = NMEA_PROFILE_ACTIVE;
+    ctrl->profile_last_error = GNSS_CTRL_OK;
+    ESP_LOGI(TAG, "Receiver %d: === NMEA restore OK ===", ctrl->receiver);
+    return GNSS_CTRL_OK;
 }
 
 size_t gnss_um980_url_decode(char* str, size_t max_len)

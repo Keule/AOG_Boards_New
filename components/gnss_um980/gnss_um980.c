@@ -7,10 +7,14 @@
  *   accuracy_valid = fresh GST received
  *   valid          = position_valid AND motion_valid
  *   fresh          = valid AND all required data within timeout
+ *
+ * NAV-UM980-LOG-SYNTAX-RATE-FIX-001 additions:
+ *   - GSA/GSV per-sentence counters
+ *   - Last sentence type/age tracking
+ *   - NMEA rate measurement with sliding window
  * ======================================================================== */
 
 #include "gnss_um980.h"
-#include "esp_timer.h"
 #include <string.h>
 
 /* ---- Internal: check if GGA fix_quality represents any valid fix ---- */
@@ -32,47 +36,54 @@ static void gnss_um980_rebuild_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
 
     /* ---- Update position from GGA ---- */
     if (rx->gga_dirty && rx->gga_valid) {
+        snap->latitude    = rx->gga.latitude;
+        snap->longitude   = rx->gga.longitude;
+        snap->altitude    = rx->gga.altitude;
+        snap->satellites  = rx->gga.num_sats;
+        snap->hdop        = rx->gga.hdop;
+        snap->fix_quality = gnss_fix_quality_from_gga(rx->gga.fix_quality);
+        snap->rtk_status  = gnss_rtk_status_from_gga(rx->gga.fix_quality);
+        snap->correction_age_valid = rx->gga.age_diff_valid;
+        snap->correction_age_s     = rx->gga.age_diff_valid ? rx->gga.age_diff : 0.0;
         snap->last_gga_time_ms = timestamp_ms;
 
+        /* Position validity depends on fix quality */
         if (gga_has_valid_fix(&rx->gga)) {
-            /* GOOD GGA: update position data AND set valid */
-            snap->latitude    = rx->gga.latitude;
-            snap->longitude   = rx->gga.longitude;
-            snap->altitude    = rx->gga.altitude;
-            snap->satellites  = rx->gga.num_sats;
-            snap->hdop        = rx->gga.hdop;
-            snap->fix_quality = gnss_fix_quality_from_gga(rx->gga.fix_quality);
-            snap->rtk_status  = gnss_rtk_status_from_gga(rx->gga.fix_quality);
-            snap->correction_age_valid = rx->gga.age_diff_valid;
-            snap->correction_age_s     = rx->gga.age_diff_valid ? rx->gga.age_diff : 0.0;
-            snap->last_valid_gga_time_ms = timestamp_ms;
             snap->position_valid = true;
             snap->status_reason = GNSS_REASON_NONE;
+        } else {
+            snap->position_valid = false;
+            if (rx->gga.fix_quality == 0) {
+                snap->status_reason = GNSS_REASON_NO_FIX;
+            } else {
+                snap->status_reason = GNSS_REASON_UNKNOWN_FIX;
+            }
         }
-        /* BAD GGA (fix=0): update timestamp only, do NOT invalidate snapshot.
-         * Freshness timeout will eventually invalidate if no good GGA arrives. */
 
         rx->gga_dirty = false;
-    }
 
-    /* ---- Update motion from RMC ---- */
+        /* Publish GGA to position snapshot buffer for consumers */
+        if (snap->position_valid) {
+            snapshot_buffer_set(&rx->position_snapshot, &rx->gga);
+        }
+    }
     if (rx->rmc_dirty && rx->rmc_valid) {
+        snap->speed_ms   = gnss_knots_to_ms(rx->rmc.speed_knots);
+        snap->course_deg = rx->rmc.course_true;
         snap->last_rmc_time_ms = timestamp_ms;
 
+        /* Motion validity requires RMC status A (active) */
         if (rx->rmc.status_valid) {
-            /* GOOD RMC (status A): update motion data AND set valid */
-            snap->speed_ms   = gnss_knots_to_ms(rx->rmc.speed_knots);
-            snap->course_deg = rx->rmc.course_true;
-            snap->last_valid_rmc_time_ms = timestamp_ms;
             snap->motion_valid = true;
             if (snap->status_reason == GNSS_REASON_NONE ||
                 snap->status_reason == GNSS_REASON_RMC_VOID ||
                 snap->status_reason == GNSS_REASON_NO_RMC) {
                 snap->status_reason = GNSS_REASON_NONE;
             }
+        } else {
+            snap->motion_valid = false;
+            snap->status_reason = GNSS_REASON_RMC_VOID;
         }
-        /* BAD RMC (status V): update timestamp only, do NOT invalidate snapshot.
-         * Freshness timeout will eventually invalidate if no good RMC arrives. */
 
         rx->rmc_dirty = false;
     }
@@ -101,9 +112,6 @@ static void gnss_um980_rebuild_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
 
     /* Fresh mark: just rebuilt, run freshness check */
     gnss_snapshot_check_freshness(snap, timestamp_ms, 0 /* use default */);
-
-    /* Publish to position snapshot buffer for downstream consumers */
-    snapshot_buffer_set(&rx->position_snapshot, snap);
 }
 
 /* ---- Public API ---- */
@@ -121,19 +129,11 @@ void gnss_um980_init(gnss_um980_t* rx, uint8_t instance_id, const char* name)
 
     nmea_parser_init(&rx->nmea_parser);
     gnss_snapshot_init(&rx->snapshot);
-
-    /* Initialize position snapshot buffer for downstream consumers */
-    gnss_snapshot_init(&rx->position_storage);
-    snapshot_buffer_init(&rx->position_snapshot,
-                        &rx->position_storage,
-                        sizeof(gnss_snapshot_t));
+    snapshot_buffer_init(&rx->position_snapshot, &rx->position_storage,
+                         sizeof(nmea_gga_t));
 
     /* Register service step callback */
     rx->component.service_step = gnss_um980_service_step;
-
-    /* NAV-FIX-001 AP-B: Register fast path hooks for 100 Hz on Core 1 */
-    rx->component.fast_input   = gnss_um980_fast_input;
-    rx->component.fast_process = gnss_um980_fast_process;
 }
 
 void gnss_um980_set_rx_source(gnss_um980_t* rx, byte_ring_buffer_t* source)
@@ -207,12 +207,11 @@ uint32_t gnss_um980_feed(gnss_um980_t* rx, const uint8_t* data, size_t length)
                 break;
 
             default:
-                rx->unknown_prefix_count++;
                 break;
             }
-            /* R2: Track last valid sentence type and timestamp */
-            rx->last_sentence_type = (uint32_t)rx->nmea_parser.type;
-            rx->last_sentence_us = (uint64_t)esp_timer_get_time();
+
+            /* Track last sentence type and timestamp */
+            rx->last_sentence_type = rx->nmea_parser.type;
         } else if (result == NMEA_RESULT_INVALID_CHECKSUM) {
             rx->checksum_errors++;
             rx->snapshot.last_error = GNSS_ERR_CHECKSUM;
@@ -221,18 +220,16 @@ uint32_t gnss_um980_feed(gnss_um980_t* rx, const uint8_t* data, size_t length)
         } else if (result == NMEA_RESULT_OVERFLOW) {
             rx->overflow_errors++;
             rx->snapshot.last_error = GNSS_ERR_OVERFLOW;
-        } else if (result == NMEA_RESULT_BINARY_REJECT) {
-            /* NAV-GNSS-NMEA-CORRUPTION-001 WP-E:
-             * Binary byte detected within sentence data.
-             * Parser has already reset to IDLE for resync. */
-            rx->binary_rejects++;
         }
     }
 
     rx->sentences_parsed += sentences_parsed;
 
-    /* Propagate parser diagnostic counters to GNSS instance */
-    rx->garbage_discarded = rx->nmea_parser.garbage_discarded;
+    /* Update last_sentence_us from service_step caller — not available here.
+     * Set to 0 and let service_step stamp it. */
+    if (sentences_parsed > 0) {
+        rx->last_sentence_us = 0; /* will be set by service_step */
+    }
 
     return sentences_parsed;
 }
@@ -243,6 +240,81 @@ void gnss_um980_finalize_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
         return;
     }
     gnss_um980_rebuild_snapshot(rx, timestamp_ms);
+}
+
+/* ---- NMEA rate measurement constants ---- */
+#define GNSS_RATE_WINDOW_MS    5000    /* 5-second sliding window */
+#define GNSS_RATE_MIN_WINDOW_MS 1000   /* minimum window for valid rate */
+
+/* Rate thresholds for status flags */
+#define GNSS_RATE_GGA_HIGH_HZ     30.0f
+#define GNSS_RATE_RMC_HIGH_HZ     30.0f
+#define GNSS_RATE_GST_HIGH_HZ     30.0f
+#define GNSS_RATE_GSA_HIGH_HZ      5.0f
+#define GNSS_RATE_GSV_ACTIVE_HZ    0.2f
+#define GNSS_RATE_TOTAL_HIGH_HZ   90.0f
+#define GNSS_RATE_DUPLICATE_HZ   120.0f
+
+/* Rate guard: max auto-recovery attempts per boot */
+#define GNSS_RATE_GUARD_MAX_RECOVERIES 1
+
+/* ---- Internal: update NMEA rate measurement ---- */
+static void gnss_um980_update_rate(gnss_um980_t* rx, uint64_t timestamp_ms)
+{
+    if (rx == NULL) return;
+
+    uint32_t counts[5] = {
+        rx->gga_count,
+        rx->rmc_count,
+        rx->gst_count,
+        rx->gsa_count,
+        rx->gsv_count
+    };
+
+    rx->nmea_rate.curr_time_ms = timestamp_ms;
+
+    if (rx->nmea_rate.prev_time_ms == 0) {
+        /* First sample — just store baseline */
+        memcpy(rx->nmea_rate.prev_counts, counts, sizeof(counts));
+        rx->nmea_rate.prev_time_ms = timestamp_ms;
+        rx->nmea_rate.warmup = true;
+        return;
+    }
+
+    uint64_t delta_ms = timestamp_ms - rx->nmea_rate.prev_time_ms;
+
+    /* Only compute rate if window is large enough */
+    if (delta_ms < GNSS_RATE_MIN_WINDOW_MS) {
+        return;
+    }
+
+    rx->nmea_rate.window_ms = (uint32_t)delta_ms;
+
+    /* rate_hz = (count_now - count_prev) * 1000.0 / delta_ms */
+    float total = 0.0f;
+    for (int i = 0; i < 5; i++) {
+        uint32_t delta_count = counts[i] - rx->nmea_rate.prev_counts[i];
+        float hz = (delta_ms > 0) ? ((float)delta_count * 1000.0f / (float)delta_ms) : 0.0f;
+        rx->nmea_rate.rates_hz[i] = hz;
+        total += hz;
+    }
+    rx->nmea_rate.total_hz = total;
+
+    /* Update status flags */
+    rx->nmea_rate.rate_high = (
+        rx->nmea_rate.rates_hz[0] > GNSS_RATE_GGA_HIGH_HZ ||
+        rx->nmea_rate.rates_hz[1] > GNSS_RATE_RMC_HIGH_HZ ||
+        rx->nmea_rate.rates_hz[2] > GNSS_RATE_GST_HIGH_HZ ||
+        rx->nmea_rate.rates_hz[3] > GNSS_RATE_GSA_HIGH_HZ
+    );
+    rx->nmea_rate.gsv_active = (rx->nmea_rate.rates_hz[4] > GNSS_RATE_GSV_ACTIVE_HZ);
+    rx->nmea_rate.duplicate_suspected = (total > GNSS_RATE_DUPLICATE_HZ);
+
+    /* Slide window */
+    memcpy(rx->nmea_rate.prev_counts, counts, sizeof(counts));
+    rx->nmea_rate.prev_time_ms = timestamp_ms;
+    rx->nmea_rate.warmup = false;
+    rx->nmea_rate.sample_count++;
 }
 
 void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us)
@@ -265,19 +337,26 @@ void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us)
     }
 
     /* Consume bytes from RX source buffer
-       tmp must be large enough for multiple NMEA sentences (max ~82 bytes each).
-       In production, service_step is called repeatedly in a task loop, but tests
-       may batch multiple sentences before calling service_step once. */
-    uint8_t tmp[256];
-    size_t available = byte_ring_buffer_available(rx->rx_source);
+     * If nmea_config is intercepting, it handles RX → feed.
+     * gnss_um980_service_step skips direct reads in that case. */
+    if (!rx->nmea_config_intercept) {
+        /* Normal mode: read from UART RX buffer directly */
+        uint8_t tmp[64];
+        size_t available = byte_ring_buffer_available(rx->rx_source);
 
-    if (available > 0) {
-        size_t to_read = available > sizeof(tmp) ? sizeof(tmp) : available;
-        size_t pulled = byte_ring_buffer_read(rx->rx_source, tmp, to_read);
-        if (pulled > 0) {
-            gnss_um980_feed(rx, tmp, pulled);
+        if (available > 0) {
+            size_t to_read = available > sizeof(tmp) ? sizeof(tmp) : available;
+            size_t pulled = byte_ring_buffer_read(rx->rx_source, tmp, to_read);
+            if (pulled > 0) {
+                uint32_t before = rx->sentences_parsed;
+                gnss_um980_feed(rx, tmp, pulled);
+                if (rx->sentences_parsed > before) {
+                    rx->last_sentence_us = timestamp_us;
+                }
+            }
         }
     }
+    /* else: nmea_config handles RX → feed, nothing to do here */
 
     /* Rebuild snapshot if any sentence type was updated */
     if (rx->gga_dirty || rx->rmc_dirty || rx->gst_dirty) {
@@ -292,6 +371,9 @@ void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us)
     if (was_fresh && !rx->snapshot.fresh && rx->snapshot.valid) {
         rx->timeout_events++;
     }
+
+    /* Update NMEA rate measurement every service step */
+    gnss_um980_update_rate(rx, ts_ms);
 }
 
 const nmea_gga_t* gnss_um980_get_gga(const gnss_um980_t* rx)
@@ -326,14 +408,6 @@ const gnss_snapshot_t* gnss_um980_get_snapshot(const gnss_um980_t* rx)
     return &rx->snapshot;
 }
 
-const snapshot_buffer_t* gnss_um980_get_position_snapshot(const gnss_um980_t* rx)
-{
-    if (rx == NULL) {
-        return NULL;
-    }
-    return &rx->position_snapshot;
-}
-
 bool gnss_um980_has_fix(const gnss_um980_t* rx)
 {
     if (rx == NULL) {
@@ -350,51 +424,10 @@ bool gnss_um980_is_fresh(const gnss_um980_t* rx)
     return rx->snapshot.fresh;
 }
 
-/* ---- NAV-FIX-001 AP-B: Fast Path Hooks (Core 1, 100 Hz) ---- */
-
-void gnss_um980_fast_input(runtime_component_t* comp, const fast_cycle_context_t* ctx)
+const snapshot_buffer_t* gnss_um980_get_position_snapshot(const gnss_um980_t* rx)
 {
-    gnss_um980_t* rx = (gnss_um980_t*)comp;
-    if (rx == NULL || rx->rx_source == NULL) {
-        return;
-    }
-
-    (void)ctx;  /* timestamp available via ctx->timestamp_us if needed */
-
-    /* Consume bytes from RX source buffer (same logic as service_step) */
-    uint8_t tmp[64];
-    size_t available = byte_ring_buffer_available(rx->rx_source);
-
-    if (available > 0) {
-        size_t to_read = available > sizeof(tmp) ? sizeof(tmp) : available;
-        size_t pulled = byte_ring_buffer_read(rx->rx_source, tmp, to_read);
-        if (pulled > 0) {
-            gnss_um980_feed(rx, tmp, pulled);
-        }
-    }
-}
-
-void gnss_um980_fast_process(runtime_component_t* comp, const fast_cycle_context_t* ctx)
-{
-    gnss_um980_t* rx = (gnss_um980_t*)comp;
     if (rx == NULL) {
-        return;
+        return NULL;
     }
-
-    uint64_t ts_ms = ctx->timestamp_us / 1000;
-    rx->last_service_ms = ts_ms;
-
-    /* Rebuild snapshot if any sentence type was updated by fast_input */
-    if (rx->gga_dirty || rx->rmc_dirty || rx->gst_dirty) {
-        gnss_um980_rebuild_snapshot(rx, ts_ms);
-    }
-
-    /* Always check freshness (even when no new data) */
-    bool was_fresh = rx->snapshot.fresh;
-    gnss_snapshot_check_freshness(&rx->snapshot, ts_ms, rx->freshness_timeout_ms);
-
-    /* Count timeout transitions (fresh → stale) */
-    if (was_fresh && !rx->snapshot.fresh && rx->snapshot.valid) {
-        rx->timeout_events++;
-    }
+    return &rx->position_snapshot;
 }

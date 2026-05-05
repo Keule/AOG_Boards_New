@@ -2,8 +2,6 @@
 #include <string.h>
 #include "esp_log.h"
 #include "app_core.h"
-
-#define TAG "app_core"
 #include "feature_flags.h"
 #include "board_profile.h"
 #include "runtime.h"
@@ -22,14 +20,7 @@
 #include "rtcm_router.h"
 #include "nav_rtcm_wiring.h"
 #include "aog_navigation_app.h"
-#include "nav_diagnostics.h"
-#include "hal_eth.h"
-#include "hw_runtime_diag.h"
-#include "nav_ntrip_config.h"
-#include "remote_diag.h"
-#include "remote_log.h"
-#include "gnss_um980_snapshot.h"
-#include "gnss_um980_control.h"
+#include "gnss_nmea_config.h"
 #endif
 
 /* ---- Steering subsystem includes ----
@@ -45,7 +36,7 @@
 #include "transport_udp.h"
 #endif
 
-/* TAG defined at top of file via #define TAG "app_core" */
+static const char* TAG = "APP_CORE";
 
 /* ---- Constants ---- */
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
@@ -67,174 +58,6 @@
 #define SAFETY_WATCHDOG_TIMEOUT_US  100000u  /* 100 ms */
 #endif
 
-/* ================================================================
- * WP-C: Pin Sanity Check
- *
- * Validates GPIO pin assignments at boot for the classic ESP32:
- *   - GPIO 0..33: input+output capable
- *   - GPIO 34..39: INPUT ONLY (cannot be used as TX)
- *
- * This check runs ONCE during app_core_init() and ABORTS further
- * init if a critical pin conflict is detected.
- * ================================================================ */
-
-/* Classic ESP32 input-only GPIO range */
-#define ESP32_INPUT_ONLY_GPIO_MIN  34
-#define ESP32_INPUT_ONLY_GPIO_MAX  39
-
-static bool is_esp32_input_only_gpio(int pin)
-{
-    return (pin >= ESP32_INPUT_ONLY_GPIO_MIN && pin <= ESP32_INPUT_ONLY_GPIO_MAX);
-}
-
-/**
- * Run sanity checks on board profile pin assignments.
- * Returns true if all checks pass, false if a critical error found.
- *
- * Checks:
- * 1. UART TX pins must NOT be input-only GPIOs (34..39 on classic ESP32)
- * 2. GPIO35 must NOT be used as TX (explicit hard rule from task spec)
- * 3. NAV role: Ethernet must be RMII, not W5500
- * 4. GNSS UART pins must be assigned and non-negative
- */
-static bool board_pin_sanity_check(void)
-{
-    bool ok = true;
-
-    ESP_LOGI(TAG, "=== BOARD PIN SANITY CHECK ===");
-
-    /* ---- Check UART pins ---- */
-    int uart_ports[] = {
-        BOARD_UART_CONSOLE,
-        BOARD_UART_GNSS_PRIMARY,
-        BOARD_UART_GNSS_SECONDARY,
-    };
-    const char* uart_names[] = {
-        "CONSOLE",
-        "GNSS1",
-        "GNSS2",
-    };
-
-    for (int i = 0; i < 3; i++) {
-        board_uart_port_t port = (board_uart_port_t)uart_ports[i];
-        if (!board_profile_has_uart(port)) {
-            continue;  /* port not active on this build */
-        }
-
-        board_uart_pins_t pins;
-        if (!board_profile_get_uart_pins(port, &pins)) {
-            continue;
-        }
-
-        /* Check TX not input-only */
-        if (is_esp32_input_only_gpio(pins.tx_pin)) {
-            ESP_LOGE("BOARD_PIN",
-                     "%s UART TX=GPIO%d is input-only (GPIO%d..%d)",
-                     uart_names[i], pins.tx_pin,
-                     ESP32_INPUT_ONLY_GPIO_MIN, ESP32_INPUT_ONLY_GPIO_MAX);
-            ok = false;
-        }
-
-        /* Hard rule: GPIO35 must NOT be TX (input-only, also known to be unreliable as RX) */
-        if (pins.tx_pin == 35) {
-            ESP_LOGE("BOARD_PIN",
-                     "%s UART TX=GPIO35 violates hard rule (GPIO35 is input-only on classic ESP32)",
-                     uart_names[i]);
-            ok = false;
-        }
-
-        /* Verify GNSS2 RX has been moved away from GPIO35 (unstable RX path) */
-        if (port == BOARD_UART_GNSS_SECONDARY && pins.rx_pin == 35) {
-            ESP_LOGE("BOARD_PIN",
-                     "GNSS2 UART RX=GPIO35 — known unstable RX path. Must use GPIO34 or other input-only pin.");
-            ok = false;
-        }
-    }
-
-#if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
-    /* ---- Check Ethernet type ---- */
-    ethernet_kind_t eth = board_profile_get_eth();
-    if (eth == ETH_W5500_SPI) {
-        ESP_LOGE("BOARD_PIN",
-                 "NAV role requires ETH_INTERNAL_MAC_RMII, but board reports ETH_W5500_SPI");
-        ok = false;
-    }
-#endif
-
-    if (ok) {
-        ESP_LOGI(TAG, "=== BOARD PIN SANITY CHECK: PASS ===");
-    } else {
-        ESP_LOGE(TAG, "=== BOARD PIN SANITY CHECK: FAIL — init aborted ===");
-    }
-
-    return ok;
-}
-
-/* ================================================================
- * WP-B: Boot-Log — Pin Profile
- *
- * Prints the complete board pin profile at startup.
- * ================================================================ */
-
-static void board_pin_boot_log(void)
-{
-    board_type_t board = board_profile_get_board();
-    (void)board;  /* logged via BOARD_PROFILE_NAME macro above */
-
-    /* ---- Line 1: Profile & Role ---- */
-    const char* role = "UNKNOWN";
-#if defined(DEVICE_ROLE_NAVIGATION)
-    role = "NAV";
-#elif defined(DEVICE_ROLE_STEERING)
-    role = "STEER";
-#elif defined(DEVICE_ROLE_FULL_TEST)
-    role = "FULL_TEST";
-#endif
-
-    ESP_LOGI(TAG, "BOARD: profile=%s role=%s", BOARD_PROFILE_NAME, role);
-
-    /* ---- Line 2: Ethernet ---- */
-    board_eth_pins_t eth_pins;
-    if (board_profile_get_eth_pins(&eth_pins)) {
-        ESP_LOGI(TAG, "BOARD: eth=RTL8201/RMII clk=GPIO0_IN mdc=%d mdio=%d power=%d reset=%d",
-                 eth_pins.mdc_pin, eth_pins.mdio_pin,
-                 eth_pins.power_pin, eth_pins.reset_pin);
-    } else {
-        ethernet_kind_t eth = board_profile_get_eth();
-        ESP_LOGI(TAG, "BOARD: eth=%d (no RMII pin details)", (int)eth);
-    }
-
-    /* ---- Lines 3-4: GNSS UARTs ---- */
-    board_uart_pins_t uart_pins;
-    if (board_profile_has_uart(BOARD_UART_GNSS_PRIMARY) &&
-        board_profile_get_uart_pins(BOARD_UART_GNSS_PRIMARY, &uart_pins)) {
-        ESP_LOGI(TAG, "BOARD: gnss1 uart=1 baud=%d tx=%d rx=%d",
-                 BOARD_GNSS_UART_BAUDRATE, uart_pins.tx_pin, uart_pins.rx_pin);
-    }
-    if (board_profile_has_uart(BOARD_UART_GNSS_SECONDARY) &&
-        board_profile_get_uart_pins(BOARD_UART_GNSS_SECONDARY, &uart_pins)) {
-        ESP_LOGI(TAG, "BOARD: gnss2 uart=2 baud=%d tx=%d rx=%d",
-                 BOARD_GNSS_UART_BAUDRATE, uart_pins.tx_pin, uart_pins.rx_pin);
-    }
-
-    /* ---- Line 5: SD Card ---- */
-    board_sd_pins_t sd_pins;
-    if (board_profile_get_sd_pins(&sd_pins)) {
-        ESP_LOGI(TAG, "BOARD: sd miso=%d mosi=%d sclk=%d cs=%d",
-                 sd_pins.miso_pin, sd_pins.mosi_pin,
-                 sd_pins.sclk_pin, sd_pins.cs_pin);
-    } else {
-        ESP_LOGI(TAG, "BOARD: sd disabled (GPIO34 reassigned to GNSS2 RX)");
-    }
-
-    /* ---- Line 6: Misc ---- */
-    board_misc_pins_t misc_pins;
-    if (board_profile_get_misc_pins(&misc_pins)) {
-        ESP_LOGI(TAG, "BOARD: safety_in=%d log_switch=%d",
-                 misc_pins.safety_in_pin, misc_pins.log_switch_pin);
-    }
-}
-
 /* ---- Static instances (no heap allocation) ---- */
 #if defined(DEVICE_ROLE_NAVIGATION) || defined(DEVICE_ROLE_FULL_TEST)
 
@@ -247,37 +70,13 @@ static gnss_um980_t          s_primary_gnss;
 static gnss_um980_t          s_secondary_gnss;
 static gnss_dual_heading_calc_t s_heading;
 
+static gnss_nmea_config_t  s_primary_nmea_config;
+static gnss_nmea_config_t  s_secondary_nmea_config;
+
 static ntrip_client_t  s_ntrip;
 static rtcm_router_t   s_rtcm_router;
 
-static gnss_um980_control_t s_primary_ctrl;     /* GNSS control: receiver 1 */
-static gnss_um980_control_t s_secondary_ctrl;   /* GNSS control: receiver 2 */
-
 static aog_nav_app_t   s_nav_app;
-
-/* NAV-HW-RUNTIME-DIAG-001: Periodic hardware diagnostics */
-static hw_runtime_diag_t s_hw_diag;
-
-/* NAV-REMOTE-DIAG-001-R2: HTTP diagnostics server */
-static remote_diag_t s_remote_diag;
-
-static nav_health_collector_t s_health_coll;
-/* s_health_snap / s_log_recovery: reserved for future NAV-DIAG subsystem expansion */
-static nav_health_snapshot_t  s_health_snap __attribute__((unused));
-static nav_diag_log_entry_t   s_log_recovery __attribute__((unused));
-
-/* ---- NAV-DIAG: ESP32 log bridge ---- */
-static void app_core_diag_log_emit(nav_diag_level_t level,
-                                     const char* module,
-                                     const char* message)
-{
-    switch (level) {
-        case NAV_DIAG_LEVEL_ERROR: ESP_LOGE("DIAG", "[%s] %s", module, message); break;
-        case NAV_DIAG_LEVEL_WARN:  ESP_LOGW("DIAG", "[%s] %s", module, message); break;
-        case NAV_DIAG_LEVEL_INFO:  ESP_LOGI("DIAG", "[%s] %s", module, message); break;
-        case NAV_DIAG_LEVEL_DEBUG: ESP_LOGD("DIAG", "[%s] %s", module, message); break;
-    }
-}
 
 #endif
 
@@ -304,15 +103,6 @@ void app_core_init(void)
 {
     ESP_LOGI(TAG, "System init");
 
-    /* ---- WP-B: Print board pin profile ---- */
-    board_pin_boot_log();
-
-    /* ---- WP-C: Sanity-check pin assignments ---- */
-    if (!board_pin_sanity_check()) {
-        ESP_LOGE(TAG, "Pin sanity check failed — aborting init");
-        return;
-    }
-
     unsigned int features = feature_flags_get();
 
     /* ---- Central ESP32 HAL UART init ----
@@ -323,29 +113,6 @@ void app_core_init(void)
      * calling it once centrally avoids ambiguity and double-init confusion. */
 #if !defined(UNIT_TEST) && !defined(NATIVE_TEST)
     hal_uart_init(hal_uart_esp32_ops());
-
-    /* ---- Central ESP32 HAL Ethernet init ----
-     * NAV-ETH-BRINGUP-001: Initialize RMII Ethernet driver (RTL8201 PHY).
-     * Must happen BEFORE transport_udp_init() so the IP stack is ready
-     * when UDP sockets are lazily opened in service_step. */
-    {
-        const hal_eth_ops_t* eth_ops = hal_eth_esp32_ops();
-        hal_err_t err = hal_eth_init(eth_ops);
-        if (err == HAL_OK && eth_ops->init) {
-            err = eth_ops->init();
-            if (err != HAL_OK) {
-                ESP_LOGE(TAG, "Ethernet HAL init failed");
-            }
-        }
-    }
-#endif
-
-    /* ---- Remote log init (NAV-REMOTE-LOG-001) ----
-     * Install vprintf hook to mirror all ESP_LOG output into RAM ringbuffer.
-     * Must happen BEFORE navigation subsystem init so their boot logs are captured.
-     * Uses non-blocking try-lock in the hook to avoid latency in log path. */
-#if !defined(UNIT_TEST) && !defined(NATIVE_TEST)
-    remote_log_init();
 #endif
 
     /* ---- Native test HAL override ----
@@ -381,13 +148,11 @@ void app_core_init(void)
         };
         transport_udp_init(&s_aog_udp, &udp_cfg);
 
-        /* TCP transport: placeholder init, real hostname is set after NTRIP secrets loaded */
-        {
-            transport_tcp_config_t tcp_cfg_init = {
-                .remote_port = NTRIP_DEFAULT_PORT
-            };
-            transport_tcp_init(&s_ntrip_tcp, &tcp_cfg_init);
-        }
+        transport_tcp_config_t tcp_cfg = {
+            .remote_ip = 0,
+            .remote_port = NTRIP_DEFAULT_PORT
+        };
+        transport_tcp_init(&s_ntrip_tcp, &tcp_cfg);
 
         /* --- GNSS receivers --- */
         gnss_um980_init(&s_primary_gnss,   0, "GNSS_PRIMARY");
@@ -395,72 +160,36 @@ void app_core_init(void)
         gnss_um980_set_rx_source(&s_primary_gnss,   &s_primary_uart.rx_buffer);
         gnss_um980_set_rx_source(&s_secondary_gnss, &s_secondary_uart.rx_buffer);
 
-        /* --- GNSS control layer (NAV-REMOTE-GNSS-CMD-001) ---
-         * Must be initialized AFTER gnss_um980 and transport_uart,
-         * BEFORE snapshot and NTRIP/RTCM. */
-        gnss_um980_control_init(&s_primary_ctrl,   1, &s_primary_uart,   &s_primary_gnss);
-        gnss_um980_control_init(&s_secondary_ctrl, 2, &s_secondary_uart, &s_secondary_gnss);
-        gnss_um980_control_register(&s_primary_ctrl);
-        gnss_um980_control_register(&s_secondary_ctrl);
+        /* --- NMEA config managers (NAV-UM980-LOG-SYNTAX-RATE-FIX-001) --- */
+        gnss_nmea_config_init(&s_primary_nmea_config,   0, "GNSS_CFG_PRIMARY");
+        gnss_nmea_config_init(&s_secondary_nmea_config, 1, "GNSS_CFG_SECONDARY");
+        gnss_nmea_config_set_sources(&s_primary_nmea_config,
+                                      &s_primary_uart, &s_primary_gnss);
+        gnss_nmea_config_set_sources(&s_secondary_nmea_config,
+                                      &s_secondary_uart, &s_secondary_gnss);
 
-        /* --- Boot-time UM980 config snapshot (NAV-UM980-CONFIG-SNAPSHOT-001) ---
-         * Queries both receivers BEFORE NTRIP, RTCM, or normal GNSS operation.
-         * Now uses gnss_um980_control for UART exclusive access.
-         * Reads: version, config, mode, mask (read-only, no modifications).
-         * Blocks ~10s total (2s settle + 2×4s query). On failure, boot continues. */
-        gnss_um980_snapshot_init();
-        gnss_um980_snapshot_run_all();
+        /* Start NMEA restore on both receivers */
+        if (board_profile_has_uart(BOARD_UART_GNSS_PRIMARY)) {
+            gnss_nmea_config_start_restore(&s_primary_nmea_config);
+        }
+        if (board_profile_has_uart(BOARD_UART_GNSS_SECONDARY)) {
+            gnss_nmea_config_start_restore(&s_secondary_nmea_config);
+        }
 
         /* --- Dual heading --- */
         gnss_dual_heading_init(&s_heading);
-        gnss_dual_heading_set_sources(&s_heading, &s_primary_gnss, &s_secondary_gnss);
+        gnss_dual_heading_set_sources(&s_heading,
+            gnss_um980_get_snapshot(&s_primary_gnss),
+            gnss_um980_get_snapshot(&s_secondary_gnss));
 
         /* --- NTRIP client ---
-         * NAV-ETH-BRINGUP-001-R2 WP-F: Try to load config from local secrets.
-         * If the file components/nav_config/nav_ntrip_secrets.local.h exists
-         * at build time, NTRIP_SECRETS_AVAILABLE is defined and we include it.
-         * Otherwise, NTRIP stays disabled with empty defaults.
-         * Password is NEVER logged. */
+         * Init, register, and configure — but do NOT start if config is invalid.
+         * Starting with empty host/mountpoint would silently fail.
+         * The client stays in IDLE until a valid config is loaded (e.g. from NVS)
+         * and ntrip_client_start() is called explicitly. */
         ntrip_client_init(&s_ntrip);
         ntrip_client_set_transport(&s_ntrip, &s_ntrip_tcp);
-
-        ntrip_client_config_t ntrip_cfg = NTRIP_CLIENT_CONFIG_DEFAULT();
-        /* Temporary hostname for TCP transport — will be overridden from secrets */
-        char ntrip_hostname[NTRIP_MAX_HOST_LEN] = "";
-
-#ifdef NTRIP_SECRETS_AVAILABLE
-        /* Include local secrets at compile time */
-#include "nav_ntrip_secrets.local.h"
-        /* Override defaults with real values (file must define these macros) */
-        if (NTRIP_HOST[0] != '\0' && NTRIP_MOUNTPOINT[0] != '\0') {
-            strncpy(ntrip_cfg.host, NTRIP_HOST, sizeof(ntrip_cfg.host) - 1);
-            ntrip_cfg.port = NTRIP_PORT;
-            strncpy(ntrip_cfg.mountpoint, NTRIP_MOUNTPOINT, sizeof(ntrip_cfg.mountpoint) - 1);
-            strncpy(ntrip_cfg.username, NTRIP_USER, sizeof(ntrip_cfg.username) - 1);
-            strncpy(ntrip_cfg.password, NTRIP_PASSWORD, sizeof(ntrip_cfg.password) - 1);
-            strncpy(ntrip_hostname, NTRIP_HOST, sizeof(ntrip_hostname) - 1);
-            ESP_LOGI(TAG, "NTRIP: config loaded from local secrets (host=%s, mount=%s)",
-                     NTRIP_HOST, NTRIP_MOUNTPOINT);
-        } else {
-            ESP_LOGW(TAG, "NTRIP: secrets file found but host/mountpoint empty");
-        }
-#else
-        ESP_LOGI(TAG, "NTRIP: no local secrets file — disabled (see nav_ntrip_secrets.example.h)");
-#endif
-
-        ntrip_client_configure(&s_ntrip, &ntrip_cfg);
-
-        /* NAV-NTRIP-NONBLOCKING-001: TCP transport needs hostname for DNS resolution */
-        transport_tcp_disconnect(&s_ntrip_tcp);  /* Reset from stub init */
-        {
-            transport_tcp_config_t tcp_cfg_real = {
-                .remote_port = ntrip_cfg.port
-            };
-            strncpy(tcp_cfg_real.hostname, ntrip_hostname,
-                    TRANSPORT_TCP_HOSTNAME_MAX - 1);
-            transport_tcp_init(&s_ntrip_tcp, &tcp_cfg_real);
-        }
-        ntrip_client_set_transport(&s_ntrip, &s_ntrip_tcp);
+        ntrip_client_configure(&s_ntrip, &(ntrip_client_config_t)NTRIP_CLIENT_CONFIG_DEFAULT());
 
         if (s_ntrip.config_valid) {
             ntrip_client_start(&s_ntrip);
@@ -528,19 +257,21 @@ void app_core_init(void)
 
         /* --- AOG navigation app --- */
         aog_nav_app_init(&s_nav_app);
-        aog_nav_app_set_position_source(&s_nav_app, gnss_um980_get_position_snapshot(&s_primary_gnss));
-        aog_nav_app_set_heading_source(&s_nav_app, gnss_dual_heading_get_snapshot(&s_heading));
+        aog_nav_app_set_position_source(&s_nav_app,
+            gnss_um980_get_position_snapshot(&s_primary_gnss));
+        aog_nav_app_set_heading_source(&s_nav_app,
+            gnss_dual_heading_get_snapshot(&s_heading));
         aog_nav_app_set_aog_rx_source(&s_nav_app, &s_aog_udp.rx_buffer);
         aog_nav_app_set_aog_tx_dest(&s_nav_app, &s_aog_udp.tx_buffer);
 
-#if defined(AOG_SYNTHETIC_MODE) && AOG_SYNTHETIC_MODE
-        aog_nav_app_set_output_mode(&s_nav_app, AOG_MODE_SYNTHETIC);
-#endif
-
         /* --- Assign service groups and register components ---
-         * Each component is assigned to its dedicated Core-0 service task group. */
+         * Each component is assigned to its dedicated Core-0 service task group.
+         * IMPORTANT: gnss_nmea_config MUST be registered AFTER UART but BEFORE
+         * gnss_um980 so it intercepts the RX buffer during restore. */
         s_primary_uart.component.service_group   = SERVICE_GROUP_UART;
         s_secondary_uart.component.service_group = SERVICE_GROUP_UART;
+        s_primary_nmea_config.component.service_group   = SERVICE_GROUP_UART;
+        s_secondary_nmea_config.component.service_group = SERVICE_GROUP_UART;
         s_primary_gnss.component.service_group   = SERVICE_GROUP_UART;
         s_secondary_gnss.component.service_group = SERVICE_GROUP_UART;
         s_heading.component.service_group        = SERVICE_GROUP_UART;
@@ -551,13 +282,12 @@ void app_core_init(void)
         s_rtcm_router.component.service_group    = SERVICE_GROUP_UART;
 
         s_aog_udp.component.service_group        = SERVICE_GROUP_UDP;
-        /* NAV-FIX-001-R2 AP-C: s_nav_app uses fast_path hooks (not service_step).
-         * service_group is irrelevant since service_step = NULL, but we
-         * assign a group for component counting / diagnostics consistency. */
-        s_nav_app.component.service_group        = SERVICE_GROUP_UDP;
+        s_nav_app.component.service_group        = SERVICE_GROUP_DIAGNOSTICS;
 
         runtime_component_register(&s_primary_uart.component);
         runtime_component_register(&s_secondary_uart.component);
+        runtime_component_register(&s_primary_nmea_config.component);
+        runtime_component_register(&s_secondary_nmea_config.component);
         runtime_component_register(&s_primary_gnss.component);
         runtime_component_register(&s_secondary_gnss.component);
         runtime_component_register(&s_heading.component);
@@ -566,58 +296,6 @@ void app_core_init(void)
         runtime_component_register(&s_rtcm_router.component);
         runtime_component_register(&s_aog_udp.component);
         runtime_component_register(&s_nav_app.component);
-
-        /* --- NAV-DIAG: Health collector wiring --- */
-        nav_health_collector_init(&s_health_coll);
-        nav_health_collector_set_uart_primary(&s_health_coll, &s_primary_uart);
-        nav_health_collector_set_uart_secondary(&s_health_coll, &s_secondary_uart);
-        nav_health_collector_set_gnss_primary(&s_health_coll, &s_primary_gnss);
-        nav_health_collector_set_gnss_secondary(&s_health_coll, &s_secondary_gnss);
-        nav_health_collector_set_heading(&s_health_coll, &s_heading);
-        nav_health_collector_set_ntrip(&s_health_coll, &s_ntrip);
-        nav_health_collector_set_rtcm_router(&s_health_coll, &s_rtcm_router);
-        nav_health_collector_set_aog_nav_app(&s_health_coll, &s_nav_app);
-        nav_health_collector_set_tcp(&s_health_coll, &s_ntrip_tcp);
-        nav_health_collector_set_eth_link(&s_health_coll, hal_eth_is_connected());
-
-        /* --- NAV-DIAG: ESP32 log callback --- */
-        nav_diag_log_set_emit_callback(app_core_diag_log_emit);
-        ESP_LOGI(TAG, "NAV-DIAG health collector wired (10 subsystems)");
-
-        /* --- NAV-HW-RUNTIME-DIAG-001: Hardware runtime diagnostics --- */
-        hw_runtime_diag_init(&s_hw_diag);
-        /* NAV-ETH-BRINGUP-001-R2 WP-B: Pass real UDP and NTRIP references.
-         * Previous code only passed nav_app and cast it to transport_udp_t
-         * (WRONG — nav_app is aog_nav_app_t, not transport_udp_t). */
-        hw_runtime_diag_set_sources(&s_hw_diag,
-                                     &s_primary_uart,
-                                     &s_secondary_uart,
-                                     &s_primary_gnss,
-                                     &s_secondary_gnss,
-                                     &s_heading,
-                                     &s_nav_app,
-                                     &s_aog_udp,
-                                     &s_ntrip,
-                                     &s_rtcm_router);
-        s_hw_diag.component.service_group = SERVICE_GROUP_DIAGNOSTICS;
-        runtime_component_register(&s_hw_diag.component);
-
-        /* --- NAV-REMOTE-DIAG-001-R2: HTTP diagnostics server ---
-         * IP-gated: starts HTTP server when DHCP provides an IP.
-         * Provides /status, /diag, /version endpoints. */
-        remote_diag_init(&s_remote_diag);
-        remote_diag_set_sources(&s_remote_diag,
-            &s_primary_uart,
-            &s_secondary_uart,
-            &s_primary_gnss,
-            &s_secondary_gnss,
-            &s_heading,
-            &s_nav_app,
-            &s_aog_udp,
-            &s_ntrip,
-            &s_rtcm_router);
-        s_remote_diag.component.service_group = SERVICE_GROUP_DIAGNOSTICS;
-        runtime_component_register(&s_remote_diag.component);
 
         ESP_LOGI(TAG, "Navigation components registered: 12 "
                  "(uart=%u, udp=%u, tcp_ntrip=%u, diag=%u)",

@@ -1,0 +1,17 @@
+{
+    "name": "gnss_nmea_config",
+    "version": "1.0.0",
+    "description": "UM980 NMEA configuration manager - LOG/UNLOG command handler with idempotent restore",
+    "targets": ["esp32"],
+    "dependencies": [
+        {
+            "name": "runtime_components"
+        },
+        {
+            "name": "transport_uart"
+        },
+        {
+            "name": "gnss_um980"
+        }
+    ]
+}

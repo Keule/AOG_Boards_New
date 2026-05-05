@@ -1,10 +1,10 @@
 idf_component_register(
     SRCS "remote_diag.c"
     INCLUDE_DIRS "."
-    REQUIRES log esp_timer esp_http_server esp_netif esp_system app_update
+    REQUIRES log esp_timer esp_http_server esp_netif esp_system
             runtime_types runtime runtime_health runtime_stats
             transport_uart gnss_um980 gnss_snapshot gnss_dual_heading
             aog_navigation_app ntrip_client rtcm_router
-            transport_udp board_profiles feature_flags hal_eth hal_ota
-            remote_log gnss_um980_snapshot gnss_um980_control
+            transport_udp board_profiles feature_flags hal_eth
+            gnss_nmea_config
 )

@@ -24,7 +24,7 @@ command/response layer with:
 1. **Exclusive UART access** via mutex
 2. **NMEA parser suspension** during commands (set `rx_source = NULL`)
 3. **One-shot pump** (`transport_uart_pump`) for HAL↔ringbuffer bridging
-4. **Safety blocklist** preventing dangerous commands (FRESET, SAVECONFIG, RESET, UPGRADE)
+4. **Safety blocklist** preventing dangerous commands (FRESET, UPGRADE)
 5. **Automatic CRLF** appending and URL decoding for HTTP integration
 6. **Retry logic** (up to 2 retries on timeout)
 

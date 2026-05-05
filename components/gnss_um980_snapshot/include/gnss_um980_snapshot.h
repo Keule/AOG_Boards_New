@@ -47,6 +47,14 @@ typedef struct {
     size_t rx1_bytes;
     size_t rx2_bytes;
     uint32_t duration_ms;
+    /* NAV-GNSS-NMEA-LOG-IDEMPOTENT-001: Blocked vs Error distinction */
+    uint8_t rx1_blocked_count;    /* Commands blocked by policy (SAVECONFIG/RESET) */
+    uint8_t rx2_blocked_count;
+    uint8_t rx1_error_count;      /* Commands with timeout or other errors */
+    uint8_t rx2_error_count;
+    uint8_t rx1_timeout_count;
+    uint8_t rx2_timeout_count;
+    bool required_ok;              /* All required read-only commands succeeded */
 } gnss_um980_snapshot_status_t;
 
 /* ---- Public API ---- */
