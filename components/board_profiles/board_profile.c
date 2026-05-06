@@ -275,3 +275,103 @@ bool board_profile_get_misc_pins(board_misc_pins_t* pins)
     return false;
 #endif
 }
+
+/* =================================================================
+ * R4 FIX: board_profile_log_all() — Comprehensive boot profile log
+ *
+ * Logs board name, role, Ethernet config, GNSS UART config, SD status,
+ * and pin sanity check. Called from app_core_nav.c before HAL init.
+ * ================================================================= */
+
+void board_profile_log_all(void)
+{
+    board_type_t board = board_profile_get_board();
+    ethernet_kind_t eth = board_profile_get_eth();
+
+    const char* board_name = "unknown";
+    const char* eth_name = "unknown";
+    switch (board) {
+        case BOARD_LILYGO_T_ETH_LITE_ESP32:   board_name = "lilygo_t_eth_lite_esp32"; break;
+        case BOARD_LILYGO_T_ETH_LITE_ESP32S3: board_name = "lilygo_t_eth_lite_esp32s3"; break;
+        default: break;
+    }
+    switch (eth) {
+        case ETH_INTERNAL_MAC_RMII: eth_name = "RTL8201/RMII"; break;
+        case ETH_W5500_SPI:         eth_name = "W5500/SPI"; break;
+        default: break;
+    }
+
+    /* Role string */
+    const char* role = "unknown";
+#if defined(DEVICE_ROLE_NAVIGATION)
+    role = "NAV";
+#elif defined(DEVICE_ROLE_STEERING)
+    role = "STEER";
+#elif defined(DEVICE_ROLE_FULL_TEST)
+    role = "FULL_TEST";
+#endif
+
+    ESP_LOGI(TAG, "profile=%s role=%s", board_name, role);
+
+    /* Ethernet pins */
+    board_eth_pins_t eth_pins;
+    if (board_profile_get_eth_pins(&eth_pins)) {
+        ESP_LOGI(TAG, "eth=%s clk=GPIO0_IN mdc=%d mdio=%d power=%d reset=%d",
+                 eth_name, eth_pins.mdc_pin, eth_pins.mdio_pin,
+                 eth_pins.power_pin, eth_pins.reset_pin);
+    } else {
+        ESP_LOGI(TAG, "eth=%s (no pins defined)", eth_name);
+    }
+
+    /* GNSS UART pins */
+    if (board_profile_has_uart(BOARD_UART_GNSS_PRIMARY)) {
+        board_uart_pins_t p;
+        if (board_profile_get_uart_pins(BOARD_UART_GNSS_PRIMARY, &p)) {
+            ESP_LOGI(TAG, "gnss1 uart=%d baud=%d tx=%d rx=%d",
+                     BOARD_UART_GNSS_PRIMARY, BOARD_GNSS_UART_BAUDRATE,
+                     p.tx_pin, p.rx_pin);
+        }
+    }
+    if (board_profile_has_uart(BOARD_UART_GNSS_SECONDARY)) {
+        board_uart_pins_t p;
+        if (board_profile_get_uart_pins(BOARD_UART_GNSS_SECONDARY, &p)) {
+            ESP_LOGI(TAG, "gnss2 uart=%d baud=%d tx=%d rx=%d",
+                     BOARD_UART_GNSS_SECONDARY, BOARD_GNSS_UART_BAUDRATE,
+                     p.tx_pin, p.rx_pin);
+        }
+    }
+
+    /* SD status */
+#if defined(CONFIG_BOARD_ESP32)
+    ESP_LOGI(TAG, "sd disabled (GPIO34 reassigned to GNSS2 RX)");
+#endif
+
+    /* Pin sanity check */
+    bool sanity_ok = true;
+
+    /* Check ETH pins are valid */
+    if (board_profile_get_eth_pins(&eth_pins)) {
+        if (eth_pins.mdc_pin < 0 || eth_pins.mdio_pin < 0) sanity_ok = false;
+        /* GPIO0 is input-only on ESP32 — correct for RMII clock input */
+    }
+
+    /* Check GNSS UART pins */
+    if (board_profile_has_uart(BOARD_UART_GNSS_PRIMARY)) {
+        board_uart_pins_t p;
+        if (board_profile_get_uart_pins(BOARD_UART_GNSS_PRIMARY, &p)) {
+            if (p.tx_pin < 0 || p.rx_pin < 0) sanity_ok = false;
+        }
+    }
+    if (board_profile_has_uart(BOARD_UART_GNSS_SECONDARY)) {
+        board_uart_pins_t p;
+        if (board_profile_get_uart_pins(BOARD_UART_GNSS_SECONDARY, &p)) {
+            if (p.tx_pin < 0 || p.rx_pin < 0) sanity_ok = false;
+        }
+    }
+
+    if (sanity_ok) {
+        ESP_LOGI(TAG, "BOARD PIN SANITY CHECK: PASS");
+    } else {
+        ESP_LOGE(TAG, "BOARD PIN SANITY CHECK: FAIL — one or more pins invalid");
+    }
+}

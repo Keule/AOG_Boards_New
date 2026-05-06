@@ -51,18 +51,9 @@ static const char* const s_blocked_prefixes[] = {
  * Covers all known talker IDs for each sentence type.
  * UM980 supports GN, GP, GA, GB talker IDs. */
 static const char* const s_unlog_cmds[] = {
-    "UNLOG COM2 GNGGA\r\n",
-    "UNLOG COM2 GPGGA\r\n",
-    "UNLOG COM2 GNRMC\r\n",
-    "UNLOG COM2 GPRMC\r\n",
-    "UNLOG COM2 GNGST\r\n",
-    "UNLOG COM2 GPGST\r\n",
-    "UNLOG COM2 GNGSA\r\n",
-    "UNLOG COM2 GPGSA\r\n",
-    "UNLOG COM2 GNGSV\r\n",    /* Explicit GSV deactivation */
-    "UNLOG COM2 GPGSV\r\n",
-    "UNLOG COM2 GBGSV\r\n",
-    "UNLOG COM2 GAGSV\r\n",
+    "GPGGA COM2 0.02\r\n",
+    "GPGST COM2 0.1\r\n",
+    "SAVECONFIG\r\n",
 };
 #define UNLOG_CMD_COUNT (sizeof(s_unlog_cmds) / sizeof(s_unlog_cmds[0]))
 
@@ -73,11 +64,17 @@ static const char* const s_unlog_cmds[] = {
  * GGA/RMC/GST: 20 Hz (0.05s) — core navigation sentences
  * GSA: 1 Hz — DOP info for quality assessment
  * GSV: DISABLED — removed to reduce ~40-60% of NMEA traffic volume */
+
 static const char* const s_nmea_restore_cmds[] = {
-    "LOG COM2 GNGGA ONTIME 0.05\r\n",
-    "LOG COM2 GNRMC ONTIME 0.05\r\n",
-    "LOG COM2 GNGST ONTIME 0.05\r\n",
-    "LOG COM2 GNGSA ONTIME 1\r\n",
+     /* 
+    "GPGGA COM2 0.02\r\n",
+    "GPRMC COM2 0.05\r\n",
+    "GPGST COM2 0.1\r\n",
+    "GPGSA COM2 1\r\n", 
+ */
+    "GPGGA COM2 0.02\r\n",
+    "GPGST COM2 0.1\r\n",
+    "SAVECONFIG\r\n",
     /* GSV intentionally omitted — disabled in Phase 1 */
 };
 #define NMEA_RESTORE_CMD_COUNT (sizeof(s_nmea_restore_cmds) / sizeof(s_nmea_restore_cmds[0]))
@@ -465,7 +462,7 @@ gnss_ctrl_err_t gnss_um980_send_command_expect(gnss_um980_control_t* ctrl,
 gnss_ctrl_err_t gnss_um980_control_unlogall(gnss_um980_control_t* ctrl)
 {
     char response[256];
-    return gnss_um980_send_command(ctrl, "UNLOGALL", response, sizeof(response), 2000);
+    return gnss_um980_send_command(ctrl, "SAVECONFIG", response, sizeof(response), 2000);
 }
 
 /* =================================================================

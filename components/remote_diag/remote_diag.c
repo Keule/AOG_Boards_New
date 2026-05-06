@@ -1,5 +1,5 @@
 /* ========================================================================
- * remote_diag.c — Remote Diagnostics over Ethernet (NAV-REMOTE-DIAG-001-R2)
+ * remote_diag.c — Remote Diagnostics over Ethernet (NAV-REMOTE-DIAG-001-R3)
  *
  * Minimal HTTP server using ESP-IDF esp_http_server.
  * Provides /status, /diag, /version endpoints as JSON/text.
@@ -20,6 +20,10 @@
  *   - B4: RTK/Fix status from raw + interpreted
  *   - B5: NTRIP bytes_rx + last_rx_age, RTCM per-output last_tx_age
  *
+ * R3 changes:
+ *   - A3: ETH link/IP state + HTTP running flag in /status JSON
+ *   - A3: hal_eth_get_status() for link diagnostics
+ *
  * JSON response format is hand-crafted (no cJSON dependency).
  * ======================================================================== */
 
@@ -33,6 +37,14 @@
 #include "esp_system.h"
 #include "esp_http_server.h"
 #include "esp_netif.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+/* ---- HAL ETH for link/IP status (R3) ---- */
+#include "hal_eth.h"
+
+/* ---- HAL OTA for firmware update (R5) ---- */
+#include "hal_ota.h"
 
 /* ---- Observed component headers ---- */
 #include "runtime_stats.h"
@@ -50,6 +62,9 @@
 #include "board_profile.h"
 #include "feature_flags.h"
 #include "gnss_nmea_config.h"
+
+/* ---- Remote log for /logs endpoints (R6) ---- */
+#include "remote_log.h"
 
 static const char* TAG = "REMOTE_DIAG";
 
@@ -146,6 +161,7 @@ static const char* restore_state_str(nmea_restore_state_t s)
         case NMEA_RESTORE_IDLE:      return "idle";
         case NMEA_RESTORE_UNLOGGING: return "unlogging";
         case NMEA_RESTORE_SETTING:   return "setting";
+        case NMEA_RESTORE_VERIFYING: return "verifying";
         case NMEA_RESTORE_DONE:      return "done";
         case NMEA_RESTORE_FAILED:    return "failed";
         default:                     return "unknown";
@@ -320,13 +336,23 @@ static void build_status_json(remote_diag_t* diag, char* buf, size_t buf_size)
         jw_kv_str(&jw, "reset_reason", rs);
     }
 
-    /* Network */
+    /* Network + ETH/HTTP state (R3 A3) */
     {
         net_status_t ns;
         get_net_status(&ns);
+        jw_kv_bool(&jw, "eth_has_ip", ns.has_ip);
         jw_kv_str(&jw, "ip", ns.ip);
         jw_kv_str(&jw, "netmask", ns.netmask);
         jw_kv_str(&jw, "gateway", ns.gateway);
+        /* ETH link status from hal_eth */
+        const hal_eth_status_t* eth_st = hal_eth_get_status();
+        if (eth_st != NULL) {
+            jw_kv_bool(&jw, "eth_initialized", eth_st->initialized);
+            jw_kv_bool(&jw, "eth_link_up", eth_st->link_up);
+            jw_kv_bool(&jw, "eth_got_ip", eth_st->got_ip);
+        }
+        /* HTTP server state */
+        jw_kv_bool(&jw, "http_running", diag->http_server != NULL);
     }
 
     /* Fast Loop */
@@ -678,8 +704,14 @@ static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
     {
         net_status_t ns;
         get_net_status(&ns);
+        const hal_eth_status_t* eth_st = hal_eth_get_status();
         o += snprintf(buf + o, buf_size - o,
-            "Network: ip=%s/%s gw=%s\n", ns.ip, ns.netmask, ns.gateway);
+            "Network: ip=%s/%s gw=%s eth_init=%s link=%s got_ip=%s http=%s\n",
+            ns.ip, ns.netmask, ns.gateway,
+            (eth_st && eth_st->initialized) ? "yes" : "no",
+            (eth_st && eth_st->link_up) ? "up" : "down",
+            (eth_st && eth_st->got_ip) ? "yes" : "no",
+            diag->http_server ? "running" : "waiting");
     }
 
     /* Fast Loop */
@@ -772,7 +804,7 @@ static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
         }
     }
 
-    /* NMEA restore status */
+    /* NMEA restore status (NAV-UART-STABILIZING-R1: includes effect flags) */
     {
         const gnss_nmea_config_t* cfgs[2] = {
             as_nmea_cfg(diag->primary_nmea_config),
@@ -782,12 +814,29 @@ static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
         for (int c = 0; c < 2; c++) {
             const gnss_nmea_config_t* cfg = cfgs[c];
             if (cfg != NULL) {
+                /* Build effect flags string */
+                uint32_t ef = gnss_nmea_config_get_effect_flags(cfg);
+                char efb[80];
+                int efp = 0;
+                if (ef & RESTORE_EFFECT_ACK_OK)                     efp += snprintf(efb+efp, sizeof(efb)-efp, "%sACK_OK", efp?"|":"");
+                if (ef & RESTORE_EFFECT_ACK_MISSING_BUT_EFFECT_OK)  efp += snprintf(efb+efp, sizeof(efb)-efp, "%sNO_ACK_BUT_OK", efp?"|":"");
+                if (ef & RESTORE_EFFECT_ACK_OK_BUT_EFFECT_BAD)      efp += snprintf(efb+efp, sizeof(efb)-efp, "%sACK_BAD_EFFECT", efp?"|":"");
+                if (ef & RESTORE_EFFECT_TIMEOUT)                   efp += snprintf(efb+efp, sizeof(efb)-efp, "%sTIMEOUT", efp?"|":"");
+                if (ef & RESTORE_EFFECT_GSV_STILL_ACTIVE)            efp += snprintf(efb+efp, sizeof(efb)-efp, "%sGSV_ACTIVE", efp?"|":"");
+                if (ef & RESTORE_EFFECT_GST_NOT_AVAILABLE)           efp += snprintf(efb+efp, sizeof(efb)-efp, "%sGST_NA", efp?"|":"");
+                if (ef & RESTORE_EFFECT_RATE_TOO_HIGH)              efp += snprintf(efb+efp, sizeof(efb)-efp, "%sRATE_HIGH", efp?"|":"");
+                if (ef & RESTORE_EFFECT_RATE_TOO_LOW)               efp += snprintf(efb+efp, sizeof(efb)-efp, "%sRATE_LOW", efp?"|":"");
+                if (ef & RESTORE_EFFECT_UART_OVERRUN)               efp += snprintf(efb+efp, sizeof(efb)-efp, "%sUART_OVERRUN", efp?"|":"");
+                if (ef & RESTORE_EFFECT_RING_FULL)                  efp += snprintf(efb+efp, sizeof(efb)-efp, "%sRING_FULL", efp?"|":"");
+                if (efp == 0) snprintf(efb, sizeof(efb), "NONE");
+
                 o += snprintf(buf + o, buf_size - o,
-                    "NMEA_RESTORE %s: state=%s ok=%u fail=%u%s\n",
+                    "NMEA_RESTORE %s: state=%s ok=%u fail=%u effect=%s%s\n",
                     cfg_labels[c],
                     restore_state_str(cfg->restore_state),
                     cfg->restore_ok_count,
                     cfg->restore_fail_count,
+                    efb,
                     cfg->restore_fail_cmd[0] ? cfg->restore_fail_cmd : "");
             }
         }
@@ -807,8 +856,8 @@ static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
                     bool rate_suspected = gnss->nmea_rate.rate_high ||
                                           gnss->nmea_rate.duplicate_suspected;
                     o += snprintf(buf + o, buf_size - o,
-                        "UART_OVERRUN %s: overruns=%u cause=%s\n",
-                        uart_lbl[u], st->rx_overflow_count,
+                        "UART_OVERRUN %s: overruns=%lu cause=%s\n",
+                        uart_lbl[u], (unsigned long)st->rx_overflow_count,
                         rate_suspected ? "nmea_rate_too_high" : "service_stall_suspected");
                 }
             }
@@ -894,7 +943,7 @@ static void build_diag_text(remote_diag_t* diag, char* buf, size_t buf_size)
 }
 
 /* =================================================================
- * HTTP handlers
+ * HTTP handlers — Boot-Safe diagnostics
  * ================================================================= */
 
 static esp_err_t status_handler(httpd_req_t* req)
@@ -926,6 +975,341 @@ static esp_err_t version_handler(httpd_req_t* req)
         " + NAV-UM980-LOG-SYNTAX-RATE-FIX-001\n";
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_send(req, v, strlen(v));
+    return ESP_OK;
+}
+
+/* =================================================================
+ * R5: Remote Maintenance — OTA + Reboot handlers
+ * ================================================================= */
+
+/* Idempotent guard: OTA handlers already registered */
+static bool s_ota_handlers_registered = false;
+
+/* ---- OTA: GET /ota — upload form + status ---- */
+static esp_err_t ota_get_handler(httpd_req_t* req)
+{
+    const char* html =
+        "<!DOCTYPE html>\n"
+        "<html><head><meta charset=\"utf-8\"><title>OTA Update</title></head>\n"
+        "<body>\n"
+        "<h1>OTA Firmware Update</h1>\n"
+        "<p>Active partition: <b>%s</b></p>\n"
+        "<p>Next partition: <b>%s</b></p>\n"
+        "<p>OTA state: <b>%s</b></p>\n"
+        "<form method=\"POST\" action=\"/ota\" enctype=\"multipart/form-data\">\n"
+        "  <input type=\"file\" name=\"firmware\" accept=\".bin\"><br><br>\n"
+        "  <input type=\"submit\" value=\"Upload Firmware\">\n"
+        "</form>\n"
+        "<br><hr>\n"
+        "<form method=\"POST\" action=\"/reboot\">\n"
+        "  <input type=\"submit\" value=\"Reboot Device\">\n"
+        "</form>\n"
+        "</body></html>\n";
+
+    char buf[1024];
+    const char* active = hal_ota_get_active_partition_label();
+    const char* next   = hal_ota_get_next_partition_label();
+    const char* state  = hal_ota_get_state_str();
+    snprintf(buf, sizeof(buf), html,
+             active ? active : "unknown",
+             next   ? next   : "none",
+             state  ? state  : "unknown");
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, buf, strlen(buf));
+    return ESP_OK;
+}
+
+/* ---- OTA: POST /ota — firmware binary upload ---- */
+
+/* ESP-IDF multipart parser is heavy; use simple Content-Length approach.
+ * The form sends the raw binary with Content-Type: application/octet-stream. */
+
+#define OTA_MAX_IMAGE_SIZE  (3 * 1024 * 1024)  /* 3 MB — matches partition size */
+#define OTA_RX_BUF_SIZE     4096
+
+static esp_err_t ota_post_handler(httpd_req_t* req)
+{
+    int content_len = req->content_len;
+
+    ESP_LOGI(TAG, "OTA: upload started content_len=%d", content_len);
+
+    /* Validate size */
+    if (content_len <= 0 || content_len > (int)OTA_MAX_IMAGE_SIZE) {
+        ESP_LOGE(TAG, "OTA: invalid image size %d (max=%d)", content_len, (int)OTA_MAX_IMAGE_SIZE);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid image size");
+        return ESP_FAIL;
+    }
+
+    /* Check for OTA already in progress */
+    if (hal_ota_is_in_progress()) {
+        ESP_LOGE(TAG, "OTA: upload already in progress");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA already in progress");
+        return ESP_FAIL;
+    }
+
+    /* Begin OTA write */
+    hal_err_t ota_err = hal_ota_begin((size_t)content_len);
+    if (ota_err != HAL_OK) {
+        ESP_LOGE(TAG, "OTA: begin failed err=0x%x", (unsigned)ota_err);
+        char errbuf[128];
+        snprintf(errbuf, sizeof(errbuf), "OTA begin failed: 0x%x", (unsigned)ota_err);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, errbuf);
+        return ESP_FAIL;
+    }
+
+    /* Read chunks and write to OTA partition */
+    uint8_t* rx_buf = (uint8_t*)malloc(OTA_RX_BUF_SIZE);
+    if (rx_buf == NULL) {
+        ESP_LOGE(TAG, "OTA: failed to allocate rx buffer");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
+        return ESP_FAIL;
+    }
+
+    int remaining = content_len;
+    bool ota_success = true;
+
+    while (remaining > 0) {
+        int to_read = (remaining > OTA_RX_BUF_SIZE) ? OTA_RX_BUF_SIZE : remaining;
+        int recv_len = httpd_req_recv(req, (char*)rx_buf, to_read);
+
+        if (recv_len <= 0) {
+            if (recv_len == HTTPD_SOCK_ERR_TIMEOUT) {
+                ESP_LOGE(TAG, "OTA: receive timeout");
+            } else {
+                ESP_LOGE(TAG, "OTA: receive error ret=%d", recv_len);
+            }
+            ota_success = false;
+            break;
+        }
+
+        hal_err_t write_err = hal_ota_write(rx_buf, (size_t)recv_len);
+        if (write_err != HAL_OK) {
+            ESP_LOGE(TAG, "OTA: write failed err=0x%x at offset=%d",
+                     (unsigned)write_err, content_len - remaining);
+            ota_success = false;
+            break;
+        }
+
+        remaining -= recv_len;
+    }
+
+    free(rx_buf);
+
+    if (!ota_success) {
+        ESP_LOGE(TAG, "OTA: upload failed bytes_written=%d/%d",
+                 (int)hal_ota_get_bytes_written(), content_len);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA write failed");
+        return ESP_FAIL;
+    }
+
+    /* Finalize OTA */
+    ESP_LOGI(TAG, "OTA: image received=%d bytes, verifying...", content_len);
+    ota_err = hal_ota_end();
+    if (ota_err != HAL_OK) {
+        ESP_LOGE(TAG, "OTA: end/verify failed err=0x%x", (unsigned)ota_err);
+        char errbuf[128];
+        snprintf(errbuf, sizeof(errbuf), "OTA verify failed: 0x%x", (unsigned)ota_err);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, errbuf);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "OTA: update complete, boot partition set to %s",
+             hal_ota_get_next_partition_label());
+
+    const char* success_html =
+        "<!DOCTYPE html>\n"
+        "<html><head><meta charset=\"utf-8\"><title>OTA Success</title></head>\n"
+        "<body>\n"
+        "<h1>Firmware Update Successful</h1>\n"
+        "<p>Bytes written: %d</p>\n"
+        "<p>New boot partition: <b>%s</b></p>\n"
+        "<form method=\"POST\" action=\"/reboot\">\n"
+        "  <input type=\"submit\" value=\"Reboot Now\">\n"
+        "</form>\n"
+        "</body></html>\n";
+
+    char resp[512];
+    snprintf(resp, sizeof(resp), success_html,
+             content_len,
+             hal_ota_get_next_partition_label());
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, resp, strlen(resp));
+    return ESP_OK;
+}
+
+/* ---- Reboot: POST /reboot ---- */
+static esp_err_t reboot_post_handler(httpd_req_t* req)
+{
+    ESP_LOGW(TAG, "OTA: reboot requested via WebUI");
+
+    const char* msg = "Rebooting...\n";
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, msg, strlen(msg));
+
+    /* Give HTTP response time to send before rebooting */
+    vTaskDelay(pdMS_TO_TICKS(500));
+    hal_ota_reboot();
+
+    /* Never reached */
+    return ESP_OK;
+}
+
+/* =================================================================
+ * R5: Register OTA/maintenance handlers on running HTTPD
+ * ================================================================= */
+
+esp_err_t remote_diag_register_ota_handlers(void)
+{
+    if (s_ota_handlers_registered) {
+        ESP_LOGD(TAG, "OTA: handlers already registered");
+        return ESP_OK;
+    }
+
+    if (s_diag_instance == NULL || s_diag_instance->http_server == NULL) {
+        ESP_LOGW(TAG, "OTA: cannot register handlers — HTTP server not started");
+        return ESP_FAIL;
+    }
+
+    httpd_handle_t server = (httpd_handle_t)s_diag_instance->http_server;
+
+    httpd_uri_t ota_uris[] = {
+        { .uri = "/ota",    .method = HTTP_GET,  .handler = ota_get_handler,    .user_ctx = NULL },
+        { .uri = "/ota",    .method = HTTP_POST, .handler = ota_post_handler,   .user_ctx = NULL },
+        { .uri = "/reboot", .method = HTTP_POST, .handler = reboot_post_handler,.user_ctx = NULL },
+    };
+
+    for (int i = 0; i < 3; i++) {
+        esp_err_t err = httpd_register_uri_handler(server, &ota_uris[i]);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA: failed to register %s %s (0x%x)",
+                     (ota_uris[i].method == HTTP_GET) ? "GET" : "POST",
+                     ota_uris[i].uri, (unsigned)err);
+            return ESP_FAIL;
+        }
+        ESP_LOGI(TAG, "endpoint registered %s %s",
+                 (ota_uris[i].method == HTTP_GET) ? "GET" : "POST",
+                 ota_uris[i].uri);
+    }
+
+    s_ota_handlers_registered = true;
+    ESP_LOGI(TAG, "OTA: all maintenance handlers registered (3 endpoints)");
+    return ESP_OK;
+}
+
+/* =================================================================
+ * R6: /logs/raw, /logs/view, /logs, /favicon.ico endpoints
+ * ================================================================= */
+
+/* Buffer for log output — allocated on stack in handler */
+#define LOG_BUF_SIZE  16384
+
+/* GET /logs/raw — plain text log buffer */
+static esp_err_t handler_logs_raw(httpd_req_t* req)
+{
+    if (!remote_log_is_initialized()) {
+        httpd_resp_sendstr(req, "Log buffer not initialized\r\n");
+        return ESP_OK;
+    }
+
+    char* buf = malloc(LOG_BUF_SIZE);
+    if (buf == NULL) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_OK;
+    }
+
+    size_t len = remote_log_read(buf, LOG_BUF_SIZE - 1);
+    buf[len] = '\0';
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, buf, len);
+    free(buf);
+    return ESP_OK;
+}
+
+/* GET /logs/view — HTML-formatted log view */
+static esp_err_t handler_logs_view(httpd_req_t* req)
+{
+    if (!remote_log_is_initialized()) {
+        httpd_resp_sendstr(req, "Log buffer not initialized\r\n");
+        return ESP_OK;
+    }
+
+    /* Check query param ?lines=N (default 200) */
+    uint32_t max_lines = 200;
+    char qs[32];
+    if (httpd_req_get_url_query_str(req, qs, sizeof(qs)) == ESP_OK) {
+        int qlen = strlen(qs);
+        for (int i = 0; i < qlen; i++) {
+            if (strncmp(qs + i, "lines=", 6) == 0) {
+                int n = atoi(qs + i + 6);
+                if (n > 0 && n <= 5000) max_lines = (uint32_t)n;
+                break;
+            }
+        }
+    }
+
+    char* buf = malloc(LOG_BUF_SIZE);
+    if (buf == NULL) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_OK;
+    }
+
+    size_t len = remote_log_read_tail_lines(buf, LOG_BUF_SIZE - 1, max_lines);
+    buf[len] = '\0';
+
+    /* Build HTML wrapper */
+    httpd_resp_set_type(req, "text/html");
+
+    /* Send header */
+    char header[512];
+    snprintf(header, sizeof(header),
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>AOG Log Viewer</title>"
+        "<style>"
+        "body{font-family:monospace;font-size:12px;background:#1a1a2e;color:#e0e0e0;margin:8px}"
+        "pre{white-space:pre-wrap;word-wrap:break-word}"
+        "h2{color:#00d4ff;margin-bottom:4px}"
+        ".meta{color:#888;font-size:11px;margin-bottom:8px}"
+        "</style></head><body>");
+    httpd_resp_send_chunk(req, header, strlen(header));
+
+    /* Send content as <pre> */
+    httpd_resp_send_chunk(req, "<h2>AOG ESP Multiboard Log</h2>\n", -1);
+    char meta[256];
+    snprintf(meta, sizeof(meta),
+        "<div class='meta'>Last %u lines | <a href='/logs/raw'>raw</a> "
+        "| <a href='/status'>status</a> | <a href='/diag'>diag</a></div>\n",
+        (unsigned)max_lines);
+    httpd_resp_send_chunk(req, meta, strlen(meta));
+    httpd_resp_send_chunk(req, "<pre>", 5);
+    httpd_resp_send_chunk(req, buf, len);
+    httpd_resp_send_chunk(req, "</pre>", 6);
+
+    /* Send footer */
+    httpd_resp_send_chunk(req, "</body></html>", -1);
+    httpd_resp_send_chunk(req, NULL, 0);  /* end response */
+
+    free(buf);
+    return ESP_OK;
+}
+
+/* GET /logs — redirect to /logs/view */
+static esp_err_t handler_logs_redirect(httpd_req_t* req)
+{
+    httpd_resp_set_status(req, "307 Temporary Redirect");
+    httpd_resp_set_hdr(req, "Location", "/logs/view");
+    httpd_resp_sendstr(req, "Redirecting to /logs/view");
+    return ESP_OK;
+}
+
+/* GET /favicon.ico — return 204 No Content */
+static esp_err_t handler_favicon(httpd_req_t* req)
+{
+    httpd_resp_set_status(req, "204 No Content");
+    httpd_resp_sendstr(req, "");
     return ESP_OK;
 }
 
@@ -1001,10 +1385,16 @@ void remote_diag_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         net_status_t ns;
         get_net_status(&ns);
         if (!ns.has_ip) {
-            /* No IP yet — retry next service cycle.
-             * This polls every ~10ms (DIAGNOSTICS service period).
-             * Once DHCP completes or static IP is configured,
-             * the HTTP server will start on the next cycle. */
+            /* R4 FIX (Aufgabe 7): Periodic warning when HTTP not started.
+             * Warn every ~10s (10000ms) to help diagnose missing ETH init. */
+            uint64_t uptime = get_uptime_ms(diag);
+            if (uptime > 0 && uptime % 10000 < 20) {
+                const hal_eth_status_t* eth_st = hal_eth_get_status();
+                ESP_LOGW(TAG, "HTTP not_started reason=waiting_for_ip eth_init=%s link=%s uptime=%llums",
+                         (eth_st && eth_st->initialized) ? "yes" : "no",
+                         (eth_st && eth_st->link_up) ? "up" : "down",
+                         (unsigned long long)uptime);
+            }
             return;
         }
 
@@ -1021,17 +1411,33 @@ void remote_diag_service_step(runtime_component_t* comp, uint64_t timestamp_us)
         esp_err_t err = httpd_start(&server, &config);
         if (err == ESP_OK) {
             httpd_uri_t uris[] = {
-                { .uri = "/status", .method = HTTP_GET, .handler = status_handler, .user_ctx = NULL },
-                { .uri = "/diag",   .method = HTTP_GET, .handler = diag_handler,   .user_ctx = NULL },
-                { .uri = "/version",.method = HTTP_GET, .handler = version_handler,.user_ctx = NULL },
+                { .uri = "/status",     .method = HTTP_GET, .handler = status_handler,          .user_ctx = NULL },
+                { .uri = "/diag",       .method = HTTP_GET, .handler = diag_handler,            .user_ctx = NULL },
+                { .uri = "/version",    .method = HTTP_GET, .handler = version_handler,         .user_ctx = NULL },
+                { .uri = "/logs/raw",   .method = HTTP_GET, .handler = handler_logs_raw,       .user_ctx = NULL },
+                { .uri = "/logs/view",  .method = HTTP_GET, .handler = handler_logs_view,      .user_ctx = NULL },
+                { .uri = "/logs",       .method = HTTP_GET, .handler = handler_logs_redirect,   .user_ctx = NULL },
+                { .uri = "/favicon.ico",.method = HTTP_GET, .handler = handler_favicon,         .user_ctx = NULL },
             };
-            for (int i = 0; i < 3; i++) {
-                httpd_register_uri_handler(server, &uris[i]);
+            for (int i = 0; i < 7; i++) {
+                esp_err_t reg_err = httpd_register_uri_handler(server, &uris[i]);
+                if (reg_err == ESP_OK) {
+                    ESP_LOGI(TAG, "endpoint registered GET %s", uris[i].uri);
+                } else {
+                    ESP_LOGE(TAG, "endpoint register FAILED GET %s (0x%x)",
+                             uris[i].uri, (unsigned)reg_err);
+                }
             }
 
             diag->http_server = (void*)server;
             ESP_LOGI(TAG, "HTTP server started on port %d (ip=%s)",
                      REMOTE_DIAG_HTTP_PORT, ns.ip);
+            ESP_LOGI(TAG, "REMOTE_DIAG: endpoints registered: /status,/diag,/version,/logs/raw,/logs/view,/logs,/favicon.ico");
+
+            /* R5: Auto-register OTA/maintenance handlers on same HTTPD.
+             * OTA works independently of GNSS-Restore, NTRIP, or any other
+             * runtime component. It only requires Ethernet + IP. */
+            remote_diag_register_ota_handlers();
         } else {
             ESP_LOGE(TAG, "HTTP server start failed: 0x%x (%s)",
                      (unsigned)err, esp_err_to_name(err));

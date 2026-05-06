@@ -86,7 +86,7 @@ static hal_err_t esp32_uart_init(board_uart_port_t port, const hal_uart_config_t
     /* Buffer sizes: fall back to TRANSPORT_UART buffer sizes
      * (RX 4096, TX 1024) — matched to ring buffer sizes to avoid
      * hardware FIFO overflow at 921600 baud (~12KB/s GNSS). */
-    int rx_buf = (config->rx_buffer_size > 0) ? (int)config->rx_buffer_size : 4096;
+    int rx_buf = (config->rx_buffer_size > 0) ? (int)config->rx_buffer_size : 8192;
     int tx_buf = (config->tx_buffer_size > 0) ? (int)config->tx_buffer_size : 1024;
 
     /* Install UART driver */

@@ -11,9 +11,11 @@
 import os
 from pathlib import Path
 
-def _scan_components(env, proj_dir):
-    """Add component sources and include paths for native build."""
-    comp_root = Path(proj_dir) / "components"
+try:
+    from SCons.Script import Import
+    Import("env")
+
+    proj_dir = env.subst("$PROJECT_DIR")
 
     # Components used by native tests (pure C, no ESP-IDF deps)
     needed = [
@@ -32,6 +34,7 @@ def _scan_components(env, proj_dir):
         "nav_rtcm_wiring",
     ]
 
+    comp_root = Path(proj_dir) / "components"
     for name in needed:
         comp_dir = comp_root / name
         if not comp_dir.is_dir():
@@ -40,25 +43,17 @@ def _scan_components(env, proj_dir):
         for src in comp_dir.glob("*.c"):
             env.Append(CSRC_FILES=[str(src)])
 
-def _add_mocks(env, proj_dir):
-    """Add mock implementations that override real components."""
+    # Add mock implementations that override real components.
     mocks_dir = Path(proj_dir) / "test" / "host" / "mocks"
-    if not mocks_dir.is_dir():
-        return
-    env.Append(CPPPATH=[str(mocks_dir)])
-    for src in mocks_dir.glob("*.c"):
-        env.Append(CSRC_FILES=[str(src)])
+    if mocks_dir.is_dir():
+        env.Append(CPPPATH=[str(mocks_dir)])
+        for src in mocks_dir.glob("*.c"):
+            env.Append(CSRC_FILES=[str(src)])
 
-def _add_unity_header(env, proj_dir):
-    """Add local unity.h from test/host."""
+    # Add local unity.h from test/host.
     test_host = Path(proj_dir) / "test" / "host"
     if test_host.is_dir():
         env.Append(CPPPATH=[str(test_host)])
 
-# ---- Entry point ----
-
-proj_dir = env.subst("$PROJECT_DIR")
-
-_scan_components(env, proj_dir)
-_add_mocks(env, proj_dir)
-_add_unity_header(env, proj_dir)
+except Exception:
+    pass

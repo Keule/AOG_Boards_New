@@ -103,13 +103,22 @@ typedef struct {
         uint32_t window_ms;       /* measurement window in ms */
         float    rates_hz[5];     /* per-sentence rate in Hz */
         float    total_hz;        /* sum of all rates */
+        float    bytes_per_sec;   /* bytes/s in last window */
         bool     warmup;          /* true until first full window */
         uint8_t  sample_count;    /* number of completed windows */
 
-        /* Rate status flags */
-        bool     rate_high;           /* any rate above target */
-        bool     duplicate_suspected; /* total rate >> expected */
+        /* Per-type rate status flags (NAV-UART-STABILIZING-R1) */
+        bool     gga_high;            /* GGA rate above target */
+        bool     rmc_high;            /* RMC rate above target */
+        bool     gst_missing;         /* GST expected but rate == 0 */
+        bool     gsa_high;            /* GSA rate above target */
         bool     gsv_active;          /* GSV rate > threshold */
+        bool     rate_high;           /* any nav rate above target */
+        bool     duplicate_gga;       /* GGA rate way above expected */
+        bool     duplicate_rmc;       /* RMC rate way above expected */
+
+        /* Legacy flags (kept for backward compat) */
+        bool     duplicate_suspected; /* total rate >> expected */
 
         /* Rate guard */
         uint8_t  recovery_count;      /* auto-recovery attempts */

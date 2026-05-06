@@ -300,14 +300,18 @@ static void gnss_um980_update_rate(gnss_um980_t* rx, uint64_t timestamp_ms)
     }
     rx->nmea_rate.total_hz = total;
 
-    /* Update status flags */
-    rx->nmea_rate.rate_high = (
-        rx->nmea_rate.rates_hz[0] > GNSS_RATE_GGA_HIGH_HZ ||
-        rx->nmea_rate.rates_hz[1] > GNSS_RATE_RMC_HIGH_HZ ||
-        rx->nmea_rate.rates_hz[2] > GNSS_RATE_GST_HIGH_HZ ||
-        rx->nmea_rate.rates_hz[3] > GNSS_RATE_GSA_HIGH_HZ
-    );
+    /* Update per-type rate status flags (NAV-UART-STABILIZING-R1) */
+    rx->nmea_rate.gga_high = (rx->nmea_rate.rates_hz[0] > GNSS_RATE_GGA_HIGH_HZ);
+    rx->nmea_rate.rmc_high = (rx->nmea_rate.rates_hz[1] > GNSS_RATE_RMC_HIGH_HZ);
+    rx->nmea_rate.gst_missing = (rx->nmea_rate.rates_hz[2] < 0.5f &&
+                                  rx->nmea_rate.sample_count > 2);
+    rx->nmea_rate.gsa_high = (rx->nmea_rate.rates_hz[3] > GNSS_RATE_GSA_HIGH_HZ);
     rx->nmea_rate.gsv_active = (rx->nmea_rate.rates_hz[4] > GNSS_RATE_GSV_ACTIVE_HZ);
+    rx->nmea_rate.rate_high = (rx->nmea_rate.gga_high ||
+                                rx->nmea_rate.rmc_high ||
+                                rx->nmea_rate.gsa_high);
+    rx->nmea_rate.duplicate_gga = (rx->nmea_rate.rates_hz[0] > GNSS_RATE_GGA_HIGH_HZ * 1.5f);
+    rx->nmea_rate.duplicate_rmc = (rx->nmea_rate.rates_hz[1] > GNSS_RATE_RMC_HIGH_HZ * 1.5f);
     rx->nmea_rate.duplicate_suspected = (total > GNSS_RATE_DUPLICATE_HZ);
 
     /* Slide window */

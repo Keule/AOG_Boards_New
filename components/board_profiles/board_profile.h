@@ -194,6 +194,11 @@ bool board_profile_get_sd_pins(board_sd_pins_t* pins);
  * Returns true if misc pins (safety, log switch) are defined. */
 bool board_profile_get_misc_pins(board_misc_pins_t* pins);
 
+/* ---- R4: Comprehensive boot profile log ----
+ * Logs board name, role, ETH/GNSS/SD config, and pin sanity check.
+ * Must be called from app_core_nav.c before HAL init. */
+void board_profile_log_all(void);
+
 #ifdef __cplusplus
 }
 #endif

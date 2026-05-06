@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "esp_err.h"
 #include "runtime_component.h"
 
 #ifdef __cplusplus
@@ -24,7 +25,7 @@ extern "C" {
 
 /* ---- HTTP server configuration ---- */
 #define REMOTE_DIAG_HTTP_PORT       80
-#define REMOTE_DIAG_MAX_URI_HANDLERS 4
+#define REMOTE_DIAG_MAX_URI_HANDLERS 12
 
 /* ---- Fast loop alive threshold ----
  * fast_alive = true if last runtime_stats_record() was within this many ms.
@@ -81,6 +82,20 @@ void remote_diag_set_sources(remote_diag_t* diag,
  * handle periodic housekeeping.
  * Called by the runtime service loop (Core 0). */
 void remote_diag_service_step(runtime_component_t* comp, uint64_t timestamp_us);
+
+/* ---- R5: Remote Maintenance API ----
+ *
+ * Register OTA and reboot handlers on the already-running HTTPD server.
+ * Safe to call multiple times (idempotent — checks if already registered).
+ * Must be called AFTER hal_ota_init() and AFTER HTTP server has started.
+ *
+ * Endpoints registered:
+ *   GET  /ota      — OTA upload form + status
+ *   POST /ota      — Firmware binary upload
+ *   POST /reboot   — Controlled reboot
+ *
+ * Returns ESP_OK on success, ESP_FAIL if HTTP server not started. */
+esp_err_t remote_diag_register_ota_handlers(void);
 
 #ifdef __cplusplus
 }

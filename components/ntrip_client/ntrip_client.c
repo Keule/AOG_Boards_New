@@ -242,6 +242,7 @@ void ntrip_client_init(ntrip_client_t* client)
     client->started = false;
     client->connect_attempted = false;
     client->config_valid = false;
+    client->config_source = 0;  /* NTRIP_CFG_SRC_MISSING */
     client->http_status_code = 0;
     byte_ring_buffer_init(&client->rtcm_buffer,
                           client->rtcm_storage,

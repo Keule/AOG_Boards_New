@@ -358,3 +358,9 @@ uint32_t transport_uart_rx_ring_used(const transport_uart_t* uart)
     }
     return used;
 }
+
+uint32_t transport_uart_rx_ring_capacity(const transport_uart_t* uart)
+{
+    if (uart == NULL) return 0;
+    return (uint32_t)uart->rx_buffer.capacity;
+}

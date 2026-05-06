@@ -263,7 +263,7 @@ void test_rx_overflow_is_tracked(void)
     }
 
     /* RX buffer should be full (4096 bytes) */
-    TEST_ASSERT_EQUAL(4096, transport_uart_rx_available(&uart));
+    TEST_ASSERT_EQUAL(8192, transport_uart_rx_available(&uart));
 
     /* One more service step — HAL provides more data but buffer is full */
     transport_uart_service_step((runtime_component_t*)&uart, 33000);
@@ -286,7 +286,7 @@ void test_rx_overflow_visible_in_diagnostics(void)
     transport_uart_diagnostics_t diag;
     hal_err_t err = transport_uart_diagnostics(&uart, &diag);
     TEST_ASSERT_EQUAL(HAL_OK, err);
-    TEST_ASSERT_EQUAL(4096, diag.rx_buffer_size);
+    TEST_ASSERT_EQUAL(8192, diag.rx_buffer_size);
     TEST_ASSERT_TRUE(diag.rx_overflow_total > 0);
     TEST_ASSERT_EQUAL(diag.rx_overflow_total, diag.stats.rx_overflow_count);
 }
@@ -366,7 +366,7 @@ void test_diagnostics_returns_valid_data(void)
     transport_uart_diagnostics_t diag;
     hal_err_t err = transport_uart_diagnostics(&uart, &diag);
     TEST_ASSERT_EQUAL(HAL_OK, err);
-    TEST_ASSERT_EQUAL(4096, diag.rx_buffer_size);
+    TEST_ASSERT_EQUAL(8192, diag.rx_buffer_size);
     TEST_ASSERT_EQUAL(1024, diag.tx_buffer_size);
 }
 
