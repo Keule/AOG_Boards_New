@@ -72,8 +72,6 @@ static const char* const s_nmea_restore_cmds[] = {
     "GPGST COM2 0.1\r\n",
     "GPGSA COM2 1\r\n", 
  */
-    "GPGGA COM2 0.02\r\n",
-    "GPGST COM2 0.1\r\n",
     "SAVECONFIG\r\n",
     /* GSV intentionally omitted — disabled in Phase 1 */
 };

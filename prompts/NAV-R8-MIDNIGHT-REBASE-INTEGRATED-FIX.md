@@ -4,7 +4,7 @@
 NAV-R8-MIDNIGHT-REBASE-INTEGRATED-FIX: Vom Mitternachtsstand aus Boot/RemoteDiag/OTA, NTRIP/RTCM, UM980-GNSS-Konfiguration und Snapshot-Gating in einem sauberen Durchlauf reparieren
 
 ## Kontext
-Wir nehmen den Stand von heute 0:00 Uhr als Basis und integrieren die im Tagesverlauf gewonnenen dauerhaften Erkenntnisse sauber neu. Nicht blind den Tagesstand übernehmen, sondern die validierten Erkenntnisse aus den Dokumenten verwenden.
+Wir nehmen den Stand im Zip als Basis und integrieren die im Tagesverlauf gewonnenen dauerhaften Erkenntnisse sauber neu. Nicht blind den Tagesstand übernehmen, sondern die validierten Erkenntnisse aus den Dokumenten verwenden.
 
 Verbindliche Kontextdateien:
 - `docs/adr/ADR-020-nav-boot-safe-gnss-ntrip-lessons.md`
@@ -61,12 +61,12 @@ GNSS_RTCM_TX primary/secondary tx_bytes increasing drops=0
 
 Die Frequenz wird über UM980-Commands gesetzt:
 ```text
-LOG COMx GNGGA ONTIME 0.10  # 10 Hz
-LOG COMx GNRMC ONTIME 0.10  # 10 Hz
-LOG COMx GNGSA ONTIME 1.0   # 1-Hz Epoch, ggf. 3 Sätze/s wegen Multi-Talker
-UNLOG COMx ...GSV...        # GSV aus
-GST disabled unless explicitly enabled
-```
+GPGGA COM2 0.02  # 10 Hz
+GPRMC COM2 0.05  # 10 Hz
+GPGSA COM2 1.0   # 1-Hz Epoch, ggf. 3 Sätze/s wegen Multi-Talker
+GPRMC COM2 0.05  # 10 Hz
+
+
 
 Implementiere ein receiver-spezifisches Profil:
 ```c
@@ -80,27 +80,6 @@ typedef struct {
     bool gst_enabled;
     bool gsv_enabled;
 } gnss_nmea_profile_t;
-```
-
-RX2 darf mit COM2 starten. RX1 darf nicht fest COM2 annehmen: RX1 muss COM1/COM2 per ACK+Effect-Matrix prüfen oder konfigurierbar wählen.
-
-Akzeptanz RX2:
-```text
-GNSS_CFG2 state=DONE port=COM2
-gga=8..12 rmc=8..12 gsv=0 gst=0 if disabled gsa=OK_MULTI_TALKER if sentence-rate 3Hz
-```
-
-Akzeptanz RX1:
-```text
-GNSS_CFG rx1 state=DONE selected_port=COM1/COM2
-gga=8..12 rmc=8..12 gsv=0 gst=0 if disabled
-```
-
-Falls RX1 nicht fixbar ist:
-```text
-GNSS_CFG rx1 state=FAILED
-matrix results for COM1 and COM2 logged
-reason=NO_ACK/NO_EFFECT/GSV_ACTIVE/RATE_MISMATCH
 ```
 
 ## Aufgabe D – Command-Erfolg nur durch ACK + Effect bewerten
@@ -181,8 +160,7 @@ GNSS_VALIDITY Drop-Reasons
 - Boot/ETH/RemoteDiag/OTA stabil.
 - NTRIP connected und RTCM routed to both receivers.
 - UART rx_overruns=0, tx_drops=0.
-- RX2 Profil korrekt.
-- RX1 entweder korrekt konfiguriert oder mit COM1/COM2-Matrix sauber als nicht steuerbar dokumentiert.
+- RX1/RX2 Profil korrekt.
 - GNSS valid/fresh Drop-Reasons sichtbar.
 - Keine 4294967295-Ages ohne Erklärung.
 - task_fast stabil ~100Hz.
@@ -194,8 +172,6 @@ GNSS_VALIDITY Drop-Reasons
 - NTRIP_CFG wieder host/mount empty.
 - NTRIP connected fehlt trotz Config.
 - RTCM nicht an beide GNSS geht.
-- RX1 bleibt blind COM2 ohne Portmatrix.
-- GSV_ACTIVE auf RX1 wird als OK/WARN verkauft.
 - GNSS valid=0 ohne Drop-Reasons.
 - UART-RX konkurrierend gelesen wird.
 ```
