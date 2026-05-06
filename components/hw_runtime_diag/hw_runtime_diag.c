@@ -35,8 +35,6 @@
 #include "rtcm_router.h"
 #include "transport_tcp.h"
 #include "nmea_parser.h"
-#include "gnss_nmea_config.h"
-#include "nav_ntrip_config.h"
 
 /* static const char* TAG unused — logs use inline string literals */
 
@@ -157,9 +155,7 @@ void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
                                   const void* nav_app,
                                   const void* udp,
                                   const void* ntrip,
-                                  const void* rtcm_router,
-                                  const void* primary_nmea_config,
-                                  const void* secondary_nmea_config)
+                                  const void* rtcm_router)
 {
     if (diag == NULL) return;
     diag->primary_uart = primary_uart;
@@ -171,8 +167,6 @@ void hw_runtime_diag_set_sources(hw_runtime_diag_t* diag,
     diag->udp = udp;
     diag->ntrip = ntrip;
     diag->rtcm_router = rtcm_router;
-    diag->primary_nmea_config = primary_nmea_config;
-    diag->secondary_nmea_config = secondary_nmea_config;
 }
 
 /* =================================================================
@@ -243,8 +237,8 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         if (p_uart != NULL && p_gnss != NULL) {
             ESP_LOGI("HW_DIAG",
                      "GNSS_RX: primary uart=1 bytes=%u lines=%u "
-                     "gga=%u rmc=%u gst=%u gsa=%u gsv=%u "
-                     "csum_bad=%u overflow=%u "
+                     "gga=%u rmc=%u gst=%u gsa=%u gsv=%u unk=%u "
+                     "csum_bad=%u binary_reject=%u garbage=%u "
                      "vGGA_age=%u vRMC_age=%u last=%s",
                      p_gnss->bytes_received,
                      p_gnss->sentences_parsed,
@@ -253,8 +247,10 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      p_gnss->gst_count,
                      p_gnss->gsa_count,
                      p_gnss->gsv_count,
+                     p_gnss->unknown_prefix_count,
                      p_gnss->checksum_errors,
-                     p_gnss->overflow_errors,
+                     p_gnss->binary_rejects,
+                     p_gnss->garbage_discarded,
                      snapshot_valid_gga_age_ms(p_gnss),
                      snapshot_valid_rmc_age_ms(p_gnss),
                      last_sentence_type(p_gnss));
@@ -266,8 +262,8 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         if (s_uart != NULL && s_gnss != NULL) {
             ESP_LOGI("HW_DIAG",
                      "GNSS_RX: secondary uart=2 bytes=%u lines=%u "
-                     "gga=%u rmc=%u gst=%u gsa=%u gsv=%u "
-                     "csum_bad=%u overflow=%u "
+                     "gga=%u rmc=%u gst=%u gsa=%u gsv=%u unk=%u "
+                     "csum_bad=%u binary_reject=%u garbage=%u "
                      "vGGA_age=%u vRMC_age=%u last=%s",
                      s_gnss->bytes_received,
                      s_gnss->sentences_parsed,
@@ -276,67 +272,13 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      s_gnss->gst_count,
                      s_gnss->gsa_count,
                      s_gnss->gsv_count,
+                     s_gnss->unknown_prefix_count,
                      s_gnss->checksum_errors,
-                     s_gnss->overflow_errors,
+                     s_gnss->binary_rejects,
+                     s_gnss->garbage_discarded,
                      snapshot_valid_gga_age_ms(s_gnss),
                      snapshot_valid_rmc_age_ms(s_gnss),
                      last_sentence_type(s_gnss));
-        }
-    }
-
-    /* ---- NAV-UART-STABILIZING-R1: NMEA Rate Diagnostics ---- */
-    {
-        const gnss_um980_t* gnss_rate_arr[2] = {
-            (const gnss_um980_t*)diag->primary_gnss,
-            (const gnss_um980_t*)diag->secondary_gnss
-        };
-        const char* rate_labels[2] = { "primary", "secondary" };
-
-        for (int ri = 0; ri < 2; ri++) {
-            const gnss_um980_t* rg = gnss_rate_arr[ri];
-            if (rg == NULL) continue;
-
-            /* Only log if rates have been computed (not warmup) */
-            if (rg->nmea_rate.warmup) continue;
-
-            const transport_uart_t* rate_uart = (ri == 0)
-                ? (const transport_uart_t*)diag->primary_uart
-                : (const transport_uart_t*)diag->secondary_uart;
-            const transport_uart_stats_t* rate_us = (rate_uart != NULL) ? transport_uart_get_stats(rate_uart) : NULL;
-            uint32_t rx_over_per_s = (rate_us != NULL) ? rate_us->rx_overruns_per_s : 0;
-            uint32_t ring_used = (rate_uart != NULL) ? transport_uart_rx_ring_used(rate_uart) : 0;
-            uint32_t ring_cap = (rate_uart != NULL) ? transport_uart_rx_ring_capacity(rate_uart) : 0;
-
-            /* Build per-type flags string (Task #8) */
-            char flags_buf[64];
-            int fp = 0;
-            if (rg->nmea_rate.gsv_active)       { fp += snprintf(flags_buf + fp, sizeof(flags_buf) - fp, "%sGSV_ACTIVE", fp ? "|" : ""); }
-            if (rg->nmea_rate.gga_high)         { fp += snprintf(flags_buf + fp, sizeof(flags_buf) - fp, "%sDUPLICATE_GGA", fp ? "|" : ""); }
-            if (rg->nmea_rate.rmc_high)         { fp += snprintf(flags_buf + fp, sizeof(flags_buf) - fp, "%sDUPLICATE_RMC", fp ? "|" : ""); }
-            if (rg->nmea_rate.gst_missing)      { fp += snprintf(flags_buf + fp, sizeof(flags_buf) - fp, "%sGST_MISSING", fp ? "|" : ""); }
-            if (rg->nmea_rate.gsa_high)         { fp += snprintf(flags_buf + fp, sizeof(flags_buf) - fp, "%sGSA_HIGH", fp ? "|" : ""); }
-            if (rx_over_per_s > 0)              { fp += snprintf(flags_buf + fp, sizeof(flags_buf) - fp, "%sUART_OVERRUN", fp ? "|" : ""); }
-            if (ring_cap > 0 && ring_used >= ring_cap * 90 / 100) {
-                fp += snprintf(flags_buf + fp, sizeof(flags_buf) - fp, "%sRING_FULL", fp ? "|" : "");
-            }
-            if (fp == 0) { snprintf(flags_buf, sizeof(flags_buf), "OK"); }
-
-            ESP_LOGI("HW_DIAG",
-                     "GNSS_NMEA_RATE: %s window_ms=%u gga=%.1f rmc=%.1f gst=%.1f "
-                     "gsa=%.1f gsv=%.1f total=%.1f bytes=%.0f/s "
-                     "flags=%s uart_overruns_per_s=%u rx_ring=%u/%u",
-                     rate_labels[ri],
-                     (unsigned)rg->nmea_rate.window_ms,
-                     rg->nmea_rate.rates_hz[0],
-                     rg->nmea_rate.rates_hz[1],
-                     rg->nmea_rate.rates_hz[2],
-                     rg->nmea_rate.rates_hz[3],
-                     rg->nmea_rate.rates_hz[4],
-                     rg->nmea_rate.total_hz,
-                     rg->nmea_rate.bytes_per_sec,
-                     flags_buf,
-                     (unsigned)rx_over_per_s,
-                     (unsigned)ring_used, (unsigned)ring_cap);
         }
     }
 
@@ -622,13 +564,9 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
 
 ntrip_cfg_log:
         if (ntrip != NULL) {
-            /* Config fields — NEVER log password in plaintext.
-             * Show config_source for traceability. */
-            const char* src_name = ntrip_config_source_name(
-                (ntrip_config_source_t)ntrip->config_source);
+            /* WP-H: Config fields — NEVER log password */
             ESP_LOGI("HW_DIAG",
-                     "NTRIP_CFG: source=%s host=%s port=%u mount=%s user=%s password=%s",
-                     src_name,
+                     "NTRIP_CFG: host=%s port=%u mount=%s user=%s password=%s",
                      ntrip->config.host[0] ? "set" : "empty",
                      (unsigned)ntrip->config.port,
                      ntrip->config.mountpoint[0] ? "set" : "empty",
@@ -697,56 +635,6 @@ ntrip_cfg_log:
                      "GNSS_RTCM_TX: secondary uart=2 tx_bytes=%u drops=%u",
                      (unsigned)tx_bytes,
                      (unsigned)drops);
-        }
-    }
-
-    /* ---- R6 Aufgabe 7: GNSS_CFG Restore Diagnostics ---- */
-    {
-        const gnss_nmea_config_t* cfg_arr[2] = {
-            (const gnss_nmea_config_t*)diag->primary_nmea_config,
-            (const gnss_nmea_config_t*)diag->secondary_nmea_config
-        };
-        const char* cfg_labels[2] = { "GNSS_CFG", "GNSS_CFG2" };
-
-        for (int ci = 0; ci < 2; ci++) {
-            const gnss_nmea_config_t* cfg = cfg_arr[ci];
-            if (cfg == NULL) continue;
-
-            const char* state_str;
-            switch (cfg->restore_state) {
-                case NMEA_RESTORE_IDLE:      state_str = "IDLE"; break;
-                case NMEA_RESTORE_UNLOGGING: state_str = "UNLOGGING"; break;
-                case NMEA_RESTORE_SETTING:   state_str = "SETTING"; break;
-                case NMEA_RESTORE_VERIFYING: state_str = "VERIFYING"; break;
-                case NMEA_RESTORE_DONE:      state_str = "DONE"; break;
-                case NMEA_RESTORE_FAILED:    state_str = "FAILED"; break;
-                default:                     state_str = "UNKNOWN"; break;
-            }
-
-            ESP_LOGI("HW_DIAG",
-                     "GNSS_CFG: %s rx%u state=%s port=%s "
-                     "ok=%u fail=%u effects=0x%04x",
-                     cfg_labels[ci],
-                     cfg->instance_id + 1,
-                     state_str,
-                     cfg->um980_port,
-                     cfg->restore_ok_count,
-                     cfg->restore_fail_count,
-                     cfg->effect_flags);
-
-            /* If done/failed, show verify rates */
-            if (cfg->restore_state == NMEA_RESTORE_DONE ||
-                cfg->restore_state == NMEA_RESTORE_FAILED) {
-                ESP_LOGI("HW_DIAG",
-                         "GNSS_CFG: %s verify gga=%.1f rmc=%.1f "
-                         "gst=%.1f gsa=%.1f gsv=%.1f",
-                         cfg_labels[ci],
-                         cfg->verify_gga_hz,
-                         cfg->verify_rmc_hz,
-                         cfg->verify_gst_hz,
-                         cfg->verify_gsa_hz,
-                         cfg->verify_gsv_hz);
-            }
         }
     }
 }

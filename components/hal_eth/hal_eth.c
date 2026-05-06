@@ -1,12 +1,6 @@
 /* ========================================================================
  * hal_eth.c — ESP32 RMII Ethernet HAL (NAV-ETH-BRINGUP-001)
  *
- * R4 FIX: hal_eth_init() now calls ops->init() to actually start
- * the Ethernet driver. Previously it only stored the ops pointer,
- * which meant esp32_eth_init_real() (netif, MAC, PHY, driver install,
- * DHCP) was never called. This was the root cause of no HAL_ETH logs,
- * no got_ip, and no HTTP server in the boot output.
- *
  * Replaces previous stub with real ESP-IDF Ethernet driver:
  *   - RTL8201 PHY via RMII (generic 802.3 PHY driver)
  *   - GPIO0 input clock, MDC=23, MDIO=18, Power=12
@@ -54,22 +48,6 @@ hal_err_t hal_eth_init(const hal_eth_ops_t* ops)
         return HAL_ERR_INVALID_PARAM;
     }
     s_eth_ops = ops;
-
-    /* R4 FIX: Call the platform init function to actually start Ethernet.
-     * Without this, esp32_eth_init_real() (netif, MAC, PHY, DHCP)
-     * was never executed, causing the complete absence of HAL_ETH log
-     * messages, got_ip events, and HTTP server startup.
-     * Pattern matches hal_uart_init() where ops are stored AND init
-     * is deferred to per-port calls — but Ethernet has no per-port,
-     * so we must call init here. */
-    if (s_eth_ops->init != NULL) {
-        hal_err_t ret = s_eth_ops->init();
-        if (ret != HAL_OK) {
-            ESP_LOGE(TAG, "ETH: init failed (0x%x)", (unsigned)ret);
-            /* Do NOT clear s_eth_ops — caller may query status */
-        }
-        return ret;
-    }
     return HAL_OK;
 }
 
@@ -171,8 +149,6 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
 
 #if !defined(UNIT_TEST) && !defined(NATIVE_TEST)
 
-#if CONFIG_ETH_USE_ESP32_EMAC
-
 static hal_err_t esp32_eth_init_real(void)
 {
     memset(&s_eth_status, 0, sizeof(s_eth_status));
@@ -184,7 +160,7 @@ static hal_err_t esp32_eth_init_real(void)
         return HAL_ERR_NOT_SUPPORTED;
     }
 
-    ESP_LOGI(TAG, "ETH: init driver=Generic PHY/RMII clk=GPIO0_IN mdc=%d mdio=%d power=%d reset=%d",
+    ESP_LOGI(TAG, "ETH: init driver=RTL8201/RMII clk=GPIO0_IN mdc=%d mdio=%d power=%d reset=%d",
              pins.mdc_pin, pins.mdio_pin, pins.power_pin, pins.reset_pin);
 
     /* ---- WP-C: PHY Power GPIO12 ---- */
@@ -229,8 +205,9 @@ static hal_err_t esp32_eth_init_real(void)
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
     phy_config.phy_addr = (uint32_t)pins.phy_addr;
     phy_config.reset_gpio_num = (pins.reset_pin >= 0) ? pins.reset_pin : -1;
+    /* Use auto PHY address detection if board says 0 */
 
-    esp_eth_phy_t *phy = esp_eth_phy_new_generic(&phy_config);
+    esp_eth_phy_t *phy = esp_eth_phy_new_rtl8201(&phy_config);
     if (phy == NULL) {
         ESP_LOGE(TAG, "ETH_ERROR: phy_create_failed");
         mac->del(mac);
@@ -326,15 +303,6 @@ static bool esp32_eth_is_connected_real(void)
 {
     return s_eth_status.link_up && s_eth_status.got_ip;
 }
-
-#else /* ESP32-S3 W5500 or other SPI Ethernet — stub for now */
-
-static hal_err_t esp32_eth_init_real(void)              { return HAL_OK; }
-static hal_err_t esp32_eth_deinit_real(void)             { return HAL_OK; }
-static hal_err_t esp32_eth_get_mac_real(uint8_t mac[6])  { memset(mac, 0, 6); return HAL_OK; }
-static bool     esp32_eth_is_connected_real(void)        { return false; }
-
-#endif /* CONFIG_ETH_USE_ESP32_EMAC */
 
 #else /* UNIT_TEST or NATIVE_TEST — keep stubs */
 

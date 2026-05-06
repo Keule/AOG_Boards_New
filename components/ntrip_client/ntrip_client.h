@@ -98,7 +98,6 @@ typedef struct {
     /* Configuration (copied from caller) */
     ntrip_client_config_t config;
     bool                  config_valid;
-    int                   config_source;   /* ntrip_config_source_t: 0=missing, 1=compile, 2=secrets, 3=nvs */
 
     /* Transport reference (set by caller, NOT owned) */
     transport_tcp_t* transport;

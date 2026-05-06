@@ -13,8 +13,8 @@ extern "C" {
 
 /* ---- Transport TCP Config ---- */
 
-#define TRANSPORT_TCP_RX_BUFFER_SIZE  8192
-#define TRANSPORT_TCP_TX_BUFFER_SIZE  1024
+#define TRANSPORT_TCP_RX_BUFFER_SIZE  4096
+#define TRANSPORT_TCP_TX_BUFFER_SIZE  512
 #define TRANSPORT_TCP_HOSTNAME_MAX    128
 
 /* ---- Transport TCP Sub-States ---- */

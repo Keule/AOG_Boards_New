@@ -19,7 +19,6 @@
  */
 
 #include "steering_control.h"
-#include "safety_failsafe.h"
 #include <string.h>
 #include <math.h>
 
@@ -36,30 +35,11 @@ typedef struct {
     uint8_t reason;
 } ctrl_was_data_t;
 
-/* imu_bno085_data_t from imu_bno085.h (duplicated to avoid circular deps) */
-typedef struct {
-    double heading_rad;
-    double roll_rad;
-    double yawrate_rad_s;
-    bool valid;
-} ctrl_imu_data_t;
-
-/* Command snapshot payload for actuator consumption */
-typedef struct {
-    float steer_angle_deg;
-    float steer_angle_actual_deg;
-    float speed_ms;
-    float heading_error_deg;
-    uint8_t status;
-    bool valid;
-    bool sensors_valid;
-} ctrl_command_t;
-
 /* aog_steer_input_t from aog_pgn.h (referenced via include) */
 
 /* ---- Internal: evaluate WAS freshness for this cycle ---- */
 
-static bool eval_was_freshness(const ctrl_was_data_t* was_data,
+static bool eval_was_freshness(const was_sensor_data_t* was_data,
                                 uint64_t now_us,
                                 uint64_t timeout_us)
 {
@@ -130,11 +110,8 @@ static void reset_pid(steering_control_t* ctrl)
 
 static aog_steer_input_t s_cmd;       /* cached command */
 static ctrl_was_data_t s_was;         /* cached sensor */
-static ctrl_imu_data_t s_imu;         /* cached IMU */
-static ctrl_command_t s_act_cmd;      /* command for actuator snapshot */
 static bool s_cmd_read;               /* command available this cycle */
 static bool s_was_read;               /* sensor available this cycle */
-static bool s_imu_read;               /* IMU available this cycle */
 static uint64_t s_cmd_ts;             /* command timestamp */
 static uint64_t s_was_ts;             /* sensor timestamp */
 
@@ -162,7 +139,7 @@ void steering_control_fast_input(runtime_component_t* comp,
     s_was_ts = 0;
     if (ctrl->was_source != NULL) {
         /* Read was_sensor_data_t from snapshot */
-        ctrl_was_data_t was_snap;
+        was_sensor_data_t was_snap;
         if (snapshot_buffer_get(ctrl->was_source, &was_snap)) {
             memcpy(&s_was, &was_snap, sizeof(ctrl_was_data_t));
             s_was_read = true;
@@ -208,7 +185,7 @@ void steering_control_fast_process(runtime_component_t* comp,
         sensor_input.angle_deg    = s_was.degrees;
         sensor_input.valid        = s_was.valid;
         sensor_input.fresh        = eval_was_freshness(
-            (const ctrl_was_data_t*)&s_was,
+            (const was_sensor_data_t*)&s_was,
             now_us,
             ctrl->safety.sensor_timeout_us);
         sensor_input.timestamp_us = s_was_ts;
@@ -275,21 +252,6 @@ void steering_control_fast_output(runtime_component_t* comp,
 
     /* ---- Publish diagnostics snapshot ---- */
     snapshot_buffer_set(&ctrl->diag_snapshot, &ctrl->diag);
-
-    /* ---- Publish command snapshot for actuator ---- */
-    s_act_cmd.steer_angle_deg       = s_clamped_setpoint;
-    s_act_cmd.steer_angle_actual_deg = s_was_read ? s_was.degrees : 0.0f;
-    s_act_cmd.speed_ms              = s_cmd_read ? s_cmd.speed_ms : 0.0f;
-    s_act_cmd.heading_error_deg     = 0.0f;
-    s_act_cmd.status                = s_safety_ok ? 1 : 0;
-    s_act_cmd.valid                 = s_cmd_read;
-    s_act_cmd.sensors_valid         = s_safety_ok;
-    snapshot_buffer_set(&ctrl->cmd_snapshot, &s_act_cmd);
-
-    /* ---- Feed external safety failsafe if wired ---- */
-    if (ctrl->safety_target != NULL && s_safety_ok) {
-        safety_failsafe_feed(ctrl->safety_target, ctrl->diag.timestamp_us);
-    }
 }
 
 /* ==================================================================
@@ -322,10 +284,6 @@ void steering_control_init(steering_control_t* ctrl)
     /* Init diagnostics snapshot */
     snapshot_buffer_init(&ctrl->diag_snapshot, &ctrl->diag_storage,
                          sizeof(steer_diag_snapshot_t));
-
-    /* Init command snapshot for actuator */
-    snapshot_buffer_init(&ctrl->cmd_snapshot, ctrl->cmd_storage,
-                         sizeof(ctrl_command_t));
 
     /* Register fast-path hooks */
     ctrl->component.fast_input   = steering_control_fast_input;
@@ -437,25 +395,4 @@ const steering_output_t* steering_control_get_output(
 {
     if (ctrl == NULL) return NULL;
     return &ctrl->output;
-}
-
-void steering_control_set_imu(steering_control_t* ctrl,
-                              const snapshot_buffer_t* imu)
-{
-    if (ctrl == NULL) return;
-    ctrl->imu_source = imu;
-}
-
-void steering_control_set_safety_target(steering_control_t* ctrl,
-                                         safety_failsafe_t* sf)
-{
-    if (ctrl == NULL) return;
-    ctrl->safety_target = sf;
-}
-
-const snapshot_buffer_t* steering_control_get_command_snapshot(
-    const steering_control_t* ctrl)
-{
-    if (ctrl == NULL) return NULL;
-    return &ctrl->cmd_snapshot;
 }

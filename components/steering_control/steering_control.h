@@ -29,7 +29,6 @@
 #include "aog_pgn.h"
 #include "steering_safety.h"
 #include "steering_output.h"
-#include "safety_failsafe.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -71,10 +70,6 @@ typedef struct {
     /* Input sources (NOT owned, set by caller) */
     const snapshot_buffer_t* steer_input_source;  /**< aog_steer_input_t from aog_steering_app */
     const snapshot_buffer_t* was_source;           /**< was_sensor_data_t from was_sensor */
-    const snapshot_buffer_t* imu_source;           /**< imu_bno085_data_t from imu_bno085 */
-
-    /* Safety failsafe target (NOT owned, set by caller) */
-    safety_failsafe_t* safety_target;  /**< External safety_failsafe to feed */
 
     /* Safety gate */
     steering_safety_t safety;
@@ -95,10 +90,6 @@ typedef struct {
     steer_diag_snapshot_t diag;
     snapshot_buffer_t diag_snapshot;
     steer_diag_snapshot_t diag_storage;
-
-    /* Command snapshot (for actuator consumption) */
-    snapshot_buffer_t cmd_snapshot;
-    uint8_t cmd_storage[64];  /* storage for command snapshot payload */
 
     /* Statistics */
     uint32_t fast_cycle_count;
@@ -161,20 +152,6 @@ void steering_control_fast_output(runtime_component_t* comp,
 /** Service step (fallback, delegates to fast hooks with synthetic context). */
 void steering_control_service_step(runtime_component_t* comp,
                                    uint64_t timestamp_us);
-
-/** Bind the IMU snapshot source (NOT owned).
- *  Source is imu_bno085_data_t from imu_bno085. */
-void steering_control_set_imu(steering_control_t* ctrl,
-                              const snapshot_buffer_t* imu);
-
-/** Bind an external safety_failsafe target (NOT owned).
- *  On each valid command cycle, the failsafe watchdog is fed. */
-void steering_control_set_safety_target(steering_control_t* ctrl,
-                                         safety_failsafe_t* sf);
-
-/** Get command snapshot buffer (for actuator consumption). */
-const snapshot_buffer_t* steering_control_get_command_snapshot(
-    const steering_control_t* ctrl);
 
 /** Get diagnostics snapshot buffer (for external consumption). */
 const snapshot_buffer_t* steering_control_get_diag_snapshot(

@@ -14,7 +14,7 @@ extern "C" {
 
 /* ---- Transport UART Config ---- */
 
-#define TRANSPORT_UART_RX_BUFFER_SIZE  8192   /* Was 1024. GNSS at 921600 baud generates ~12KB/s */
+#define TRANSPORT_UART_RX_BUFFER_SIZE  4096   /* Was 1024. GNSS at 921600 baud generates ~12KB/s */
 #define TRANSPORT_UART_TX_BUFFER_SIZE  1024   /* Was 512. RTCM output can burst. */
 #define TRANSPORT_UART_BURST_SIZE      128
 
@@ -143,10 +143,6 @@ hal_err_t transport_uart_diagnostics(const transport_uart_t* uart, transport_uar
  * Increments rx_ring_stat_errors if corruption detected.
  * Safe to call from any thread/context (uses spinlock internally). */
 uint32_t transport_uart_rx_ring_used(const transport_uart_t* uart);
-
-/* Ring buffer capacity (RX buffer size in bytes).
- * Thread-safe (reads constant). */
-uint32_t transport_uart_rx_ring_capacity(const transport_uart_t* uart);
 
 #ifdef __cplusplus
 }
