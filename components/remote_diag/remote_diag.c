@@ -133,15 +133,19 @@ static const char* ntrip_state_str(ntrip_state_t s)
 static const char* status_reason_str(gnss_status_reason_t r)
 {
     switch (r) {
-        case GNSS_REASON_NONE:       return "none";
-        case GNSS_REASON_NO_FIX:     return "no_fix";
-        case GNSS_REASON_RMC_VOID:   return "rmc_void";
-        case GNSS_REASON_NO_GGA:     return "no_gga";
-        case GNSS_REASON_NO_RMC:     return "no_rmc";
-        case GNSS_REASON_STALE_GGA:  return "stale_gga";
-        case GNSS_REASON_STALE_RMC:  return "stale_rmc";
-        case GNSS_REASON_UNKNOWN_FIX: return "unknown_fix";
-        default:                     return "unknown";
+        case GNSS_REASON_NONE:                 return "none";
+        case GNSS_REASON_NO_FIX:               return "no_fix";
+        case GNSS_REASON_RMC_VOID:             return "rmc_void";
+        case GNSS_REASON_NO_GGA:               return "no_gga";
+        case GNSS_REASON_NO_RMC:               return "no_rmc";
+        case GNSS_REASON_STALE_GGA:            return "stale_gga";
+        case GNSS_REASON_STALE_RMC:            return "stale_rmc";
+        case GNSS_REASON_UNKNOWN_FIX:          return "unknown_fix";
+        case GNSS_REASON_GGA_FIX_QUALITY_0:    return "gga_fix_quality_0";
+        case GNSS_REASON_GGA_PARSE_ERROR:      return "gga_parse_error";
+        case GNSS_REASON_RMC_STATUS_V:         return "rmc_status_v";
+        case GNSS_REASON_SNAPSHOT_NOT_COMMITTED: return "snapshot_not_committed";
+        default:                                return "unknown";
     }
 }
 
@@ -1225,19 +1229,6 @@ static esp_err_t index_handler(httpd_req_t* req)
         "Same JSON response format as /gnss/1/send/</td>"
         "</tr>\n"
         "<tr>"
-        "<td class='uri'><a href='/gnss/1/unlogall' class='warn'>/gnss/1/unlogall</a></td>"
-        "<td class='method'><span class='badge badge-get'>GET</span></td>"
-        "<td class='desc warn'>Send UNLOGALL command to receiver 1 to stop all active message logs. "
-        "The receiver will stop outputting NMEA/RTCM data until logs are re-enabled. "
-        "Use with caution during active operation</td>"
-        "</tr>\n"
-        "<tr>"
-        "<td class='uri'><a href='/gnss/2/unlogall' class='warn'>/gnss/2/unlogall</a></td>"
-        "<td class='method'><span class='badge badge-get'>GET</span></td>"
-        "<td class='desc warn'>Send UNLOGALL to receiver 2 (secondary / heading). "
-        "Stops all message output on the second UART. Use with caution</td>"
-        "</tr>\n"
-        "<tr>"
         "<td class='uri'>/gnss/*</td>"
         "<td class='method'><span class='badge badge-get'>GET</span></td>"
         "<td class='desc'>Wildcard catch-all for any /gnss/ path not explicitly registered above. "
@@ -1524,8 +1515,7 @@ static esp_err_t gnss_snapshot_status_handler(httpd_req_t* req)
  *   /gnss/config          — live query both receivers
  *   /gnss/1/status        — control layer status for receiver 1
  *   /gnss/2/status        — control layer status for receiver 2
- *   /gnss/1/unlogall      — send UNLOGALL to receiver 1
- *   /gnss/2/unlogall      — send UNLOGALL to receiver 2
+
  * ================================================================= */
 
 /* JSON string escaping for raw UM980 response data */
@@ -1564,7 +1554,6 @@ static const char* ctrl_err_str(gnss_ctrl_err_t err)
         case GNSS_CTRL_ERR_TIMEOUT:         return "timeout";
         case GNSS_CTRL_ERR_UART_BUSY:       return "uart_busy";
         case GNSS_CTRL_ERR_TX_FAILED:       return "tx_failed";
-        case GNSS_CTRL_ERR_BLOCKED:         return "blocked";
         case GNSS_CTRL_ERR_EXPECT_FAILED:   return "expect_failed";
         default:                            return "unknown";
     }
@@ -1730,19 +1719,17 @@ static esp_err_t gnss_cmd_handler(httpd_req_t* req)
                 "  \"rx1_commands_sent\": %u,\n"
                 "  \"rx1_commands_ok\": %u,\n"
                 "  \"rx1_commands_timeout\": %u,\n"
-                "  \"rx1_commands_blocked\": %u,\n"
                 "  \"rx2_commands_sent\": %u,\n"
                 "  \"rx2_commands_ok\": %u,\n"
-                "  \"rx2_commands_timeout\": %u,\n"
-                "  \"rx2_commands_blocked\": %u\n"
+                "  \"rx2_commands_timeout\": %u\n"
                 "}\n",
                 c1 ? "true" : "false", c2 ? "true" : "false",
                 c1 && c1->initialized ? "true" : "false",
                 c2 && c2->initialized ? "true" : "false",
                 c1 ? (unsigned)c1->commands_sent : 0, c1 ? (unsigned)c1->commands_ok : 0,
-                c1 ? (unsigned)c1->commands_timeout : 0, c1 ? (unsigned)c1->commands_blocked : 0,
+                c1 ? (unsigned)c1->commands_timeout : 0,
                 c2 ? (unsigned)c2->commands_sent : 0, c2 ? (unsigned)c2->commands_ok : 0,
-                c2 ? (unsigned)c2->commands_timeout : 0, c2 ? (unsigned)c2->commands_blocked : 0);
+                c2 ? (unsigned)c2->commands_timeout : 0);
         } else {
             gnss_um980_control_t* ctrl = gnss_um980_control_get(receiver);
             if (ctrl == NULL) {
@@ -1757,49 +1744,15 @@ static esp_err_t gnss_cmd_handler(httpd_req_t* req)
                     "  \"command_active\": %s,\n"
                     "  \"commands_sent\": %u,\n"
                     "  \"commands_ok\": %u,\n"
-                    "  \"commands_timeout\": %u,\n"
-                    "  \"commands_blocked\": %u\n"
+                    "  \"commands_timeout\": %u\n"
                     "}\n",
                     receiver,
                     ctrl->initialized ? "true" : "false",
                     ctrl->command_active ? "true" : "false",
                     (unsigned)ctrl->commands_sent, (unsigned)ctrl->commands_ok,
-                    (unsigned)ctrl->commands_timeout, (unsigned)ctrl->commands_blocked);
+                    (unsigned)ctrl->commands_timeout);
             }
         }
-
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, json, strlen(json));
-        return ESP_OK;
-    }
-
-    /* ---- Action: /gnss/<n>/unlogall ---- */
-    if (strcmp(action, "unlogall") == 0 && receiver > 0) {
-        gnss_um980_control_t* ctrl = gnss_um980_control_get(receiver);
-        if (ctrl == NULL) {
-            char err[128];
-            snprintf(err, sizeof(err),
-                "{\"success\":false,\"error\":\"receiver %d not available\"}", receiver);
-            httpd_resp_set_type(req, "application/json");
-            httpd_resp_send(req, err, strlen(err));
-            return ESP_OK;
-        }
-
-        char response[256];
-        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, "UNLOGALL",
-                                                      response, sizeof(response), 2000);
-
-        char json[512];
-        snprintf(json, sizeof(json),
-            "{\n"
-            "  \"receiver\": %d,\n"
-            "  \"command\": \"UNLOGALL\",\n"
-            "  \"success\": %s,\n"
-            "  \"error\": \"%s\"\n"
-            "}\n",
-            receiver,
-            err == GNSS_CTRL_OK ? "true" : "false",
-            ctrl_err_str(err));
 
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, json, strlen(json));
@@ -1841,10 +1794,8 @@ static const remote_diag_endpoint_info_t s_endpoint_registry[] = {
     { "/gnss/status",         "GET",  "GNSS control status (both)" },
     { "/gnss/1/config",       "GET",  "GNSS live config (RX1)" },
     { "/gnss/1/status",       "GET",  "GNSS control status (RX1)" },
-    { "/gnss/1/unlogall",     "GET",  "GNSS UNLOGALL (RX1)" },
     { "/gnss/2/config",       "GET",  "GNSS live config (RX2)" },
     { "/gnss/2/status",       "GET",  "GNSS control status (RX2)" },
-    { "/gnss/2/unlogall",     "GET",  "GNSS UNLOGALL (RX2)" },
     { "/gnss/*",              "GET",  "GNSS wildcard (send commands)" },
     { "/endpoints",           "GET",  "Endpoint inventory (JSON)" },
 };
@@ -2004,10 +1955,8 @@ void remote_diag_service_step(runtime_component_t* comp, uint64_t timestamp_us)
                 { .uri = "/gnss/status",           .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
                 { .uri = "/gnss/1/config",         .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
                 { .uri = "/gnss/1/status",         .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
-                { .uri = "/gnss/1/unlogall",       .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
                 { .uri = "/gnss/2/config",         .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
                 { .uri = "/gnss/2/status",         .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
-                { .uri = "/gnss/2/unlogall",       .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
                 /* Wildcard fallback for parameterized /gnss/<n>/send/<cmd> */
                 { .uri = "/gnss/*",                .method = HTTP_GET,  .handler = gnss_cmd_handler,          .user_ctx = NULL },
                 /* Endpoint inventory */

@@ -7,7 +7,7 @@
 *.bin
 *.map
 .DS_Store
-
+.letta/
 # NAV-ETH-BRINGUP-001-R2 WP-G: NTRIP secret files (NEVER commit)
 *secrets.local*
 *ntrip*.local*

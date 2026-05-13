@@ -102,6 +102,38 @@ typedef struct {
     /* ---- R2: Last sentence tracking ---- */
     uint64_t last_sentence_us;      /* timestamp of last valid sentence (us) */
     uint32_t last_sentence_type;    /* nmea_sentence_type_t of last valid sentence */
+
+    /* ---- NMEA rate measurement (sliding window, from 015_UART_STABILIZING) ----
+     * Pure diagnostic: per-sentence-type Hz rates computed from cumulative counters.
+     * No functional side-effects — read-only by hw_runtime_diag for GNSS_NMEA_RATE log. */
+    struct {
+        uint32_t prev_counts[5];  /* index: 0=GGA 1=RMC 2=GST 3=GSA 4=GSV */
+        uint64_t prev_time_ms;
+        uint64_t curr_time_ms;
+        uint32_t window_ms;       /* measurement window in ms */
+        float    rates_hz[5];     /* per-sentence rate in Hz */
+        float    total_hz;        /* sum of all rates */
+        float    bytes_per_sec;   /* bytes/s in last window */
+        bool     warmup;          /* true until first full window */
+        uint8_t  sample_count;    /* number of completed windows */
+
+        /* Per-type rate status flags (NAV-UART-STABILIZING-R1) */
+        bool     gga_high;            /* GGA rate above target */
+        bool     rmc_high;            /* RMC rate above target */
+        bool     gst_missing;         /* GST expected but rate == 0 */
+        bool     gsa_high;            /* GSA rate above target */
+        bool     gsv_active;          /* GSV rate > threshold */
+        bool     rate_high;           /* any nav rate above target */
+        bool     duplicate_gga;       /* GGA rate way above expected */
+        bool     duplicate_rmc;       /* RMC rate way above expected */
+
+        /* Legacy flags (kept for backward compat) */
+        bool     duplicate_suspected; /* total rate >> expected */
+
+        /* Rate guard */
+        uint8_t  recovery_count;      /* auto-recovery attempts */
+        bool     recovery_attempted;  /* recovery triggered this boot */
+    } nmea_rate;
 } gnss_um980_t;
 
 /* ---- API ---- */

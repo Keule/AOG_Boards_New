@@ -2,12 +2,11 @@
  * gnss_um980_snapshot.h — UM980 Boot-Time Config Snapshot (NAV-UM980-CONFIG-SNAPSHOT-001)
  *
  * Queries both UM980 receivers at boot time using the gnss_um980_control layer.
- * Commands: UNLOGALL (optional), version, config, mode, mask
  *
  * Refactored for NAV-REMOTE-GNSS-CMD-001:
  *   - Uses gnss_um980_control for all UART communication
  *   - No direct transport_uart dependency
- *   - Boot sequence: settle → (UNLOGALL) → query → (restore NMEA) → continue
+ *   - Boot sequence: settle → query → configure NMEA → continue
  *
  * Memory:
  *   - 16 KB per receiver (statically allocated)
@@ -58,7 +57,7 @@ void gnss_um980_snapshot_init(void);
  * Run config snapshot on both receivers using the gnss_um980_control layer.
  *
  * MUST be called AFTER gnss_um980_control_init() and register().
- * Sequence: settle → (UNLOGALL) → version/config/mode/mask → (restore NMEA)
+ * Sequence: settle → query → configure NMEA rates → saveconfig
  * Blocks for ~10s. On failure, boot continues.
  *
  * @return true if both receivers responded to all queries

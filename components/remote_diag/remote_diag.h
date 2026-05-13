@@ -38,8 +38,8 @@
  *   - /gnss/config             — GET live config query (both receivers)
  *   - /gnss/1/status           — GET control layer status (receiver 1)
  *   - /gnss/2/status           — GET control layer status (receiver 2)
- *   - /gnss/1/unlogall         — GET send UNLOGALL to receiver 1
- *   - /gnss/2/unlogall         — GET send UNLOGALL to receiver 2
+ *   - /gnss/1/config_snapshot   — GET boot-time config snapshot (receiver 1)
+ *   - /gnss/2/config_snapshot   — GET boot-time config snapshot (receiver 2)
  *
  * NAV-REMOTE-WEB-REGRESSION-FIX-001 additions:
  *   - /endpoints              — GET endpoint inventory (JSON)

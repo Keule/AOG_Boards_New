@@ -45,16 +45,30 @@ typedef enum {
     GNSS_RTK_FIXED            /* RTK Fixed solution */
 } gnss_rtk_status_t;
 
-/* ---- Status Reason (why valid/motion_valid is false) ---- */
+/* ---- Status Reason (why valid/motion_valid is false) ---- *
+ * Extended drop-reason set per ADR-020.
+ * These reasons are mutually exclusive; the most specific applies.
+ *
+ * Priority order (highest wins when multiple apply):
+ *   SNAPSHOT_NOT_COMMITTED > NO_GGA > GGA_PARSE_ERROR >
+ *   GGA_FIX_QUALITY_0 > GGA_STALE >
+ *   NO_RMC > RMC_STATUS_V > RMC_STALE >
+ *   NO_FIX > RMC_VOID > UNKNOWN_FIX > NONE
+ */
 typedef enum {
-    GNSS_REASON_NONE = 0,      /* All OK */
-    GNSS_REASON_NO_FIX,        /* GGA fix_quality = 0 */
-    GNSS_REASON_RMC_VOID,      /* RMC status = V (void) */
-    GNSS_REASON_NO_GGA,        /* No GGA received yet */
-    GNSS_REASON_NO_RMC,        /* No RMC received yet */
-    GNSS_REASON_STALE_GGA,     /* GGA freshness timeout expired */
-    GNSS_REASON_STALE_RMC,     /* RMC freshness timeout expired */
-    GNSS_REASON_UNKNOWN_FIX    /* GGA fix_quality unrecognized */
+    GNSS_REASON_NONE = 0,            /* All OK — snapshot is valid and fresh */
+    GNSS_REASON_NO_FIX,              /* GGA fix_quality = 0 (but GGA received) */
+    GNSS_REASON_RMC_VOID,            /* RMC status = V (void) */
+    GNSS_REASON_NO_GGA,              /* No GGA sentence received at all */
+    GNSS_REASON_NO_RMC,              /* No RMC sentence received at all */
+    GNSS_REASON_STALE_GGA,           /* Last valid GGA exceeded freshness timeout */
+    GNSS_REASON_STALE_RMC,           /* Last valid RMC exceeded freshness timeout */
+    GNSS_REASON_UNKNOWN_FIX,         /* GGA fix_quality unrecognized (not 0..5) */
+    /* --- ADR-020 extended drop reasons --- */
+    GNSS_REASON_GGA_FIX_QUALITY_0,   /* GGA received but fix_quality = 0 */
+    GNSS_REASON_GGA_PARSE_ERROR,     /* GGA checksum or parse failure */
+    GNSS_REASON_RMC_STATUS_V,        /* RMC received but status = V */
+    GNSS_REASON_SNAPSHOT_NOT_COMMITTED  /* Rebuild not yet called after feed */
 } gnss_status_reason_t;
 
 /* ---- Error Codes (for diagnostics) ---- */
@@ -134,8 +148,16 @@ typedef struct {
     uint64_t    last_valid_gga_time_ms;
     uint64_t    last_valid_rmc_time_ms;
 
+    /* ---- Per-sentence-type last quality indicators (ADR-020) ---- */
+    uint8_t     last_gga_fix_quality;   /* Raw GGA fix_quality from last GGA */
+    char        last_rmc_status;        /* 'A' or 'V' or '\0' from last RMC */
+
     /* ---- Last error code for diagnostics ---- */
     gnss_error_code_t last_error;
+
+    /* ---- Snapshot rebuild tracking ---- */
+    uint64_t    last_rebuild_time_ms;    /* Timestamp of last snapshot rebuild (0 = never) */
+    bool        rebuild_pending;         /* Dirty flags set but rebuild not called */
 } gnss_snapshot_t;
 
 /* ---- Snapshot API ---- */

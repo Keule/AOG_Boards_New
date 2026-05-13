@@ -427,6 +427,7 @@ void app_core_init(void)
         ntrip_client_config_t ntrip_cfg = NTRIP_CLIENT_CONFIG_DEFAULT();
         /* Temporary hostname for TCP transport — will be overridden from secrets */
         char ntrip_hostname[NTRIP_MAX_HOST_LEN] = "";
+        const char* ntrip_config_source = "none";  /* ADR-020: track config source */
 
 #ifdef NTRIP_SECRETS_AVAILABLE
         /* Include local secrets at compile time */
@@ -439,13 +440,16 @@ void app_core_init(void)
             strncpy(ntrip_cfg.username, NTRIP_USER, sizeof(ntrip_cfg.username) - 1);
             strncpy(ntrip_cfg.password, NTRIP_PASSWORD, sizeof(ntrip_cfg.password) - 1);
             strncpy(ntrip_hostname, NTRIP_HOST, sizeof(ntrip_hostname) - 1);
+            ntrip_config_source = "local_secrets";
             ESP_LOGI(TAG, "NTRIP: config loaded from local secrets (host=%s, mount=%s)",
                      NTRIP_HOST, NTRIP_MOUNTPOINT);
         } else {
             ESP_LOGW(TAG, "NTRIP: secrets file found but host/mountpoint empty");
+            ntrip_config_source = "local_secrets_empty";
         }
 #else
         ESP_LOGI(TAG, "NTRIP: no local secrets file — disabled (see nav_ntrip_secrets.example.h)");
+        ntrip_config_source = "compile_time_defaults";
 #endif
 
         ntrip_client_configure(&s_ntrip, &ntrip_cfg);
@@ -464,8 +468,17 @@ void app_core_init(void)
 
         if (s_ntrip.config_valid) {
             ntrip_client_start(&s_ntrip);
+            ESP_LOGI(TAG, "NTRIP_CFG: source=%s host=set port=%u mount=set user=set password=set",
+                     ntrip_config_source, (unsigned)ntrip_cfg.port);
             ESP_LOGI(TAG, "NTRIP client started with valid config");
         } else {
+            ESP_LOGW(TAG, "NTRIP_CFG: source=%s host=%s port=%u mount=%s user=%s password=%s",
+                     ntrip_config_source,
+                     ntrip_cfg.host[0] ? "set" : "empty",
+                     (unsigned)ntrip_cfg.port,
+                     ntrip_cfg.mountpoint[0] ? "set" : "empty",
+                     ntrip_cfg.username[0] ? "set" : "empty",
+                     ntrip_cfg.password[0] ? "set" : "empty");
             ESP_LOGW(TAG, "NTRIP client initialised but NOT started "
                      "(empty config — host/mountpoint required)");
         }

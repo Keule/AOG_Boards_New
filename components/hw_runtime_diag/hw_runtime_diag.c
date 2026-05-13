@@ -51,7 +51,10 @@ static const char* fix_quality_name(uint8_t fq)
     }
 }
 
-/* ---- Snapshot age calculation ---- */
+/* ---- Snapshot age calculation ----
+ * ADR-020 FIX: Return 0xFFFFFFFF only internally for calculations.
+ * All human-facing logs use "invalid/none" strings instead.
+ */
 static uint32_t snapshot_age_ms(const void* gnss_ptr)
 {
     const gnss_um980_t* gnss = (const gnss_um980_t*)gnss_ptr;
@@ -66,10 +69,41 @@ static uint32_t snapshot_age_ms(const void* gnss_ptr)
         uint64_t age = now_ms - ref;
         return (age > 0xFFFFFFFFUL) ? 0xFFFFFFFFUL : (uint32_t)age;
     }
-    return 0;
+    return 0xFFFFFFFFUL;
 }
 
-/* ---- Snapshot last valid GGA/RMC age ---- */
+/* ---- Human-readable age string (ADR-020: never show raw UINT32_MAX) ---- */
+static const char* age_str(uint64_t time_ms, uint64_t now_ms, char* buf, size_t buf_size)
+{
+    if (time_ms == 0) {
+        return "never";
+    }
+    uint64_t age = (now_ms > time_ms) ? (now_ms - time_ms) : 0;
+    if (buf_size > 0) {
+        snprintf(buf, buf_size, "%llu", (unsigned long long)age);
+    }
+    return buf;
+}
+
+/* ---- Snapshot last valid GGA/RMC age (human-readable, ADR-020) ---- */
+static const char* snapshot_valid_gga_age_str(const gnss_um980_t* gnss, char* buf, size_t buf_size)
+{
+    if (gnss == NULL || gnss->snapshot.last_valid_gga_time_ms == 0) return "never";
+    uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    uint64_t age = now_ms - gnss->snapshot.last_valid_gga_time_ms;
+    if (buf_size > 0) snprintf(buf, buf_size, "%llums", (unsigned long long)age);
+    return buf;
+}
+
+static const char* snapshot_valid_rmc_age_str(const gnss_um980_t* gnss, char* buf, size_t buf_size)
+{
+    if (gnss == NULL || gnss->snapshot.last_valid_rmc_time_ms == 0) return "never";
+    uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    uint64_t age = now_ms - gnss->snapshot.last_valid_rmc_time_ms;
+    if (buf_size > 0) snprintf(buf, buf_size, "%llums", (unsigned long long)age);
+    return buf;
+}
+
 static uint32_t snapshot_valid_gga_age_ms(const gnss_um980_t* gnss)
 {
     if (gnss == NULL || gnss->snapshot.last_valid_gga_time_ms == 0) return 0xFFFFFFFFUL;
@@ -99,6 +133,26 @@ static uint32_t saturated_sub(uint32_t a, uint32_t b) __attribute__((unused));
 static uint32_t saturated_sub(uint32_t a, uint32_t b)
 {
     return (a >= b) ? (a - b) : 0;
+}
+
+/* ---- ADR-020: Extended status_reason names ---- */
+static const char* drop_reason_str(gnss_status_reason_t r)
+{
+    switch (r) {
+        case GNSS_REASON_NONE:                 return "NONE";
+        case GNSS_REASON_NO_FIX:               return "NO_FIX";
+        case GNSS_REASON_RMC_VOID:             return "RMC_VOID";
+        case GNSS_REASON_NO_GGA:               return "NO_GGA";
+        case GNSS_REASON_NO_RMC:               return "NO_RMC";
+        case GNSS_REASON_STALE_GGA:            return "GGA_STALE";
+        case GNSS_REASON_STALE_RMC:            return "RMC_STALE";
+        case GNSS_REASON_UNKNOWN_FIX:          return "UNKNOWN_FIX";
+        case GNSS_REASON_GGA_FIX_QUALITY_0:    return "GGA_FIX_QUALITY_0";
+        case GNSS_REASON_GGA_PARSE_ERROR:      return "GGA_PARSE_ERROR";
+        case GNSS_REASON_RMC_STATUS_V:         return "RMC_STATUS_V";
+        case GNSS_REASON_SNAPSHOT_NOT_COMMITTED: return "SNAPSHOT_NOT_COMMITTED";
+        default:                                return "UNKNOWN";
+    }
 }
 
 /* ---- NTRIP state name ---- */
@@ -235,11 +289,14 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         const gnss_um980_t*     p_gnss = (const gnss_um980_t*)diag->primary_gnss;
 
         if (p_uart != NULL && p_gnss != NULL) {
+            /* ADR-020: Use human-readable age strings, never raw UINT32_MAX */
+            char gga_age_buf[32];
+            char rmc_age_buf[32];
             ESP_LOGI("HW_DIAG",
                      "GNSS_RX: primary uart=1 bytes=%u lines=%u "
                      "gga=%u rmc=%u gst=%u gsa=%u gsv=%u unk=%u "
                      "csum_bad=%u binary_reject=%u garbage=%u "
-                     "vGGA_age=%u vRMC_age=%u last=%s",
+                     "vGGA_age=%s vRMC_age=%s last=%s",
                      p_gnss->bytes_received,
                      p_gnss->sentences_parsed,
                      p_gnss->gga_count,
@@ -251,8 +308,8 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      p_gnss->checksum_errors,
                      p_gnss->binary_rejects,
                      p_gnss->garbage_discarded,
-                     snapshot_valid_gga_age_ms(p_gnss),
-                     snapshot_valid_rmc_age_ms(p_gnss),
+                     snapshot_valid_gga_age_str(p_gnss, gga_age_buf, sizeof(gga_age_buf)),
+                     snapshot_valid_rmc_age_str(p_gnss, rmc_age_buf, sizeof(rmc_age_buf)),
                      last_sentence_type(p_gnss));
         }
 
@@ -260,11 +317,13 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         const gnss_um980_t*     s_gnss = (const gnss_um980_t*)diag->secondary_gnss;
 
         if (s_uart != NULL && s_gnss != NULL) {
+            char gga_age_buf[32];
+            char rmc_age_buf[32];
             ESP_LOGI("HW_DIAG",
                      "GNSS_RX: secondary uart=2 bytes=%u lines=%u "
                      "gga=%u rmc=%u gst=%u gsa=%u gsv=%u unk=%u "
                      "csum_bad=%u binary_reject=%u garbage=%u "
-                     "vGGA_age=%u vRMC_age=%u last=%s",
+                     "vGGA_age=%s vRMC_age=%s last=%s",
                      s_gnss->bytes_received,
                      s_gnss->sentences_parsed,
                      s_gnss->gga_count,
@@ -276,8 +335,8 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      s_gnss->checksum_errors,
                      s_gnss->binary_rejects,
                      s_gnss->garbage_discarded,
-                     snapshot_valid_gga_age_ms(s_gnss),
-                     snapshot_valid_rmc_age_ms(s_gnss),
+                     snapshot_valid_gga_age_str(s_gnss, gga_age_buf, sizeof(gga_age_buf)),
+                     snapshot_valid_rmc_age_str(s_gnss, rmc_age_buf, sizeof(rmc_age_buf)),
                      last_sentence_type(s_gnss));
         }
     }
@@ -322,6 +381,65 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
                      (unsigned)rx_over,
                      (unsigned)rx_buf_used, (unsigned)rx_buf_size,
                      (unsigned)tx_bytes, (unsigned)tx_drops);
+        }
+    }
+
+    /* ---- NAV-UART-STABILIZING: NMEA Rate Diagnostics (from 015_UART_STABILIZING) ---- */
+    {
+        const gnss_um980_t* p_gnss = (const gnss_um980_t*)diag->primary_gnss;
+        const gnss_um980_t* s_gnss = (const gnss_um980_t*)diag->secondary_gnss;
+
+        if (p_gnss != NULL) {
+            const char* status = "warmup";
+            if (!p_gnss->nmea_rate.warmup) {
+                /* Build status string from rate flags (read-only diagnostic) */
+                if (p_gnss->nmea_rate.duplicate_suspected) {
+                    status = "DUPLICATE";
+                } else if (p_gnss->nmea_rate.rate_high) {
+                    status = "RATE_HIGH";
+                } else if (p_gnss->nmea_rate.gst_missing) {
+                    status = "GST_MISSING";
+                } else {
+                    status = "ok";
+                }
+            }
+            ESP_LOGI("HW_DIAG",
+                     "GNSS_NMEA_RATE: primary gga=%.1f rmc=%.1f gst=%.1f gsa=%.1f gsv=%.1f "
+                     "total=%.1f/s window=%ums status=%s",
+                     (double)p_gnss->nmea_rate.rates_hz[0],
+                     (double)p_gnss->nmea_rate.rates_hz[1],
+                     (double)p_gnss->nmea_rate.rates_hz[2],
+                     (double)p_gnss->nmea_rate.rates_hz[3],
+                     (double)p_gnss->nmea_rate.rates_hz[4],
+                     (double)p_gnss->nmea_rate.total_hz,
+                     (unsigned)p_gnss->nmea_rate.window_ms,
+                     status);
+        }
+
+        if (s_gnss != NULL) {
+            const char* status = "warmup";
+            if (!s_gnss->nmea_rate.warmup) {
+                if (s_gnss->nmea_rate.duplicate_suspected) {
+                    status = "DUPLICATE";
+                } else if (s_gnss->nmea_rate.rate_high) {
+                    status = "RATE_HIGH";
+                } else if (s_gnss->nmea_rate.gst_missing) {
+                    status = "GST_MISSING";
+                } else {
+                    status = "ok";
+                }
+            }
+            ESP_LOGI("HW_DIAG",
+                     "GNSS_NMEA_RATE: secondary gga=%.1f rmc=%.1f gst=%.1f gsa=%.1f gsv=%.1f "
+                     "total=%.1f/s window=%ums status=%s",
+                     (double)s_gnss->nmea_rate.rates_hz[0],
+                     (double)s_gnss->nmea_rate.rates_hz[1],
+                     (double)s_gnss->nmea_rate.rates_hz[2],
+                     (double)s_gnss->nmea_rate.rates_hz[3],
+                     (double)s_gnss->nmea_rate.rates_hz[4],
+                     (double)s_gnss->nmea_rate.total_hz,
+                     (unsigned)s_gnss->nmea_rate.window_ms,
+                     status);
         }
     }
 
@@ -372,26 +490,55 @@ void hw_runtime_diag_service_step(runtime_component_t* comp, uint64_t timestamp_
         s_bad_line_print_mask = print_mask;
     }
 
-    /* ---- WP-C: GNSS Snapshot Health ---- */
+    /* ---- WP-C: GNSS Snapshot Health + ADR-020 GNSS_VALIDITY ---- */
     {
         const gnss_um980_t* p = (const gnss_um980_t*)diag->primary_gnss;
         if (p != NULL) {
+            /* ADR-020: Full GNSS_VALIDITY diagnostic with drop reasons */
+            char gga_seen_buf[32], gga_valid_buf[32];
+            char rmc_seen_buf[32], rmc_valid_buf[32];
+            uint64_t n = (uint64_t)(esp_timer_get_time() / 1000);
+
             ESP_LOGI("HW_DIAG",
-                     "GNSS: primary valid=%u fresh=%u fix=%s age_ms=%u",
-                     (unsigned)p->snapshot.valid,
+                     "GNSS_VALIDITY primary: "
+                     "last_gga_seen_age=%s last_gga_valid_age=%s "
+                     "gga_fix_quality=%u last_rmc_seen_age=%s last_rmc_valid_age=%s "
+                     "rmc_status=%c position_valid=%u motion_valid=%u "
+                     "fresh=%u drop_reason=%s",
+                     age_str(p->snapshot.last_gga_time_ms, n, gga_seen_buf, sizeof(gga_seen_buf)),
+                     snapshot_valid_gga_age_str(p, gga_valid_buf, sizeof(gga_valid_buf)),
+                     (unsigned)p->snapshot.last_gga_fix_quality,
+                     age_str(p->snapshot.last_rmc_time_ms, n, rmc_seen_buf, sizeof(rmc_seen_buf)),
+                     snapshot_valid_rmc_age_str(p, rmc_valid_buf, sizeof(rmc_valid_buf)),
+                     p->snapshot.last_rmc_status ? p->snapshot.last_rmc_status : '?',
+                     (unsigned)p->snapshot.position_valid,
+                     (unsigned)p->snapshot.motion_valid,
                      (unsigned)p->snapshot.fresh,
-                     fix_quality_name(p->snapshot.fix_quality),
-                     snapshot_age_ms(p));
+                     drop_reason_str(p->snapshot.status_reason));
         }
 
         const gnss_um980_t* s = (const gnss_um980_t*)diag->secondary_gnss;
         if (s != NULL) {
+            char gga_seen_buf[32], gga_valid_buf[32];
+            char rmc_seen_buf[32], rmc_valid_buf[32];
+            uint64_t n = (uint64_t)(esp_timer_get_time() / 1000);
+
             ESP_LOGI("HW_DIAG",
-                     "GNSS: secondary valid=%u fresh=%u fix=%s age_ms=%u",
-                     (unsigned)s->snapshot.valid,
+                     "GNSS_VALIDITY secondary: "
+                     "last_gga_seen_age=%s last_gga_valid_age=%s "
+                     "gga_fix_quality=%u last_rmc_seen_age=%s last_rmc_valid_age=%s "
+                     "rmc_status=%c position_valid=%u motion_valid=%u "
+                     "fresh=%u drop_reason=%s",
+                     age_str(s->snapshot.last_gga_time_ms, n, gga_seen_buf, sizeof(gga_seen_buf)),
+                     snapshot_valid_gga_age_str(s, gga_valid_buf, sizeof(gga_valid_buf)),
+                     (unsigned)s->snapshot.last_gga_fix_quality,
+                     age_str(s->snapshot.last_rmc_time_ms, n, rmc_seen_buf, sizeof(rmc_seen_buf)),
+                     snapshot_valid_rmc_age_str(s, rmc_valid_buf, sizeof(rmc_valid_buf)),
+                     s->snapshot.last_rmc_status ? s->snapshot.last_rmc_status : '?',
+                     (unsigned)s->snapshot.position_valid,
+                     (unsigned)s->snapshot.motion_valid,
                      (unsigned)s->snapshot.fresh,
-                     fix_quality_name(s->snapshot.fix_quality),
-                     snapshot_age_ms(s));
+                     drop_reason_str(s->snapshot.status_reason));
         }
     }
 

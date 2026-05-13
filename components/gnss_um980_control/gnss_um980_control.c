@@ -36,23 +36,6 @@ static const char* TAG = "GNSS_CTRL";
 #define GNSS_CTRL_MAX_RECEIVERS 2
 static gnss_um980_control_t* s_registry[GNSS_CTRL_MAX_RECEIVERS] = { NULL, NULL };
 
-/* ---- Command blocklist (case-insensitive prefix match) ---- */
-static const char* const s_blocked_prefixes[] = {
-    "FRESET",
-    "SAVECONFIG",
-    "RESET",
-    "UPGRADE",
-};
-#define BLOCKED_PREFIX_COUNT (sizeof(s_blocked_prefixes) / sizeof(s_blocked_prefixes[0]))
-
-/* ---- NMEA restore commands (sent after UNLOGALL at boot) ---- */
-static const char* const s_nmea_restore_cmds[] = {
-    "LOG COM2 GNGGA ONTIME 0.05\r\n",
-    "LOG COM2 GNRMC ONTIME 0.05\r\n",
-    "LOG COM2 GNGST ONTIME 0.05\r\n",
-    "LOG COM2 GNGSA ONTIME 1\r\n",
-};
-#define NMEA_RESTORE_CMD_COUNT (sizeof(s_nmea_restore_cmds) / sizeof(s_nmea_restore_cmds[0]))
 
 /* =================================================================
  * Internal: get current time in ms
@@ -248,32 +231,6 @@ gnss_um980_control_t* gnss_um980_control_get(int receiver)
     return s_registry[idx];
 }
 
-bool gnss_um980_control_is_command_blocked(const char* cmd)
-{
-    if (cmd == NULL || cmd[0] == '\0') return true;
-
-    /* Extract first word (uppercase) for prefix match */
-    char word[64];
-    int i;
-    for (i = 0; i < 63 && cmd[i]; i++) {
-        if (cmd[i] == ' ' || cmd[i] == '\r' || cmd[i] == '\n' || cmd[i] == '\t') {
-            break;
-        }
-        word[i] = (char)toupper((unsigned char)cmd[i]);
-    }
-    word[i] = '\0';
-
-    if (i == 0) return true;  /* Empty command */
-
-    for (size_t b = 0; b < BLOCKED_PREFIX_COUNT; b++) {
-        size_t plen = strlen(s_blocked_prefixes[b]);
-        if ((size_t)i >= plen && memcmp(word, s_blocked_prefixes[b], plen) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 gnss_ctrl_err_t gnss_um980_send_command(gnss_um980_control_t* ctrl,
                                         const char* cmd,
                                         char* response, size_t response_size,
@@ -281,13 +238,6 @@ gnss_ctrl_err_t gnss_um980_send_command(gnss_um980_control_t* ctrl,
 {
     if (ctrl == NULL || !ctrl->initialized) return GNSS_CTRL_ERR_NOT_INITIALIZED;
     if (cmd == NULL || response == NULL || response_size == 0) return GNSS_CTRL_ERR_INVALID_PARAM;
-
-    /* Check blocklist */
-    if (gnss_um980_control_is_command_blocked(cmd)) {
-        ctrl->commands_blocked++;
-        ESP_LOGW(TAG, "Receiver %d: BLOCKED command: %.40s", ctrl->receiver, cmd);
-        return GNSS_CTRL_ERR_BLOCKED;
-    }
 
     if (timeout_ms == 0) timeout_ms = GNSS_CTRL_DEFAULT_TIMEOUT;
 
@@ -384,48 +334,305 @@ gnss_ctrl_err_t gnss_um980_send_command_expect(gnss_um980_control_t* ctrl,
 }
 
 /* =================================================================
- * Boot-time helpers (used by snapshot refactor)
+ * NMEA Profile Application
+ *
+ * Sends GPGGA COM2 style commands to configure NMEA output rates,
+ * then saves config to flash via saveconfig.
  * ================================================================= */
 
-/**
- * Send UNLOGALL to stop all NMEA logging.
- * Typically called before querying config to get clean responses.
- */
-gnss_ctrl_err_t gnss_um980_control_unlogall(gnss_um980_control_t* ctrl)
+/* Internal: record a command result */
+static void record_cmd_result(gnss_nmea_profile_t* profile, int idx,
+                               const char* port, const char* cmd,
+                               int ack_status, bool effect_verified,
+                               const char* effect_detail, int decision)
 {
-    char response[256];
-    return gnss_um980_send_command(ctrl, "UNLOGALL", response, sizeof(response), 2000);
+    if (profile == NULL || idx < 0 || idx >= 8) return;
+    gnss_cmd_result_t* r = &profile->cmd_results[idx];
+    r->receiver = profile->receiver_id;
+    r->port = port;
+    r->command = cmd;
+    r->ack_status = ack_status;
+    r->effect_verified = effect_verified;
+    r->effect_detail = effect_detail;
+    r->decision = decision;
+    profile->cmd_result_count = idx + 1;
 }
 
-/**
- * Restore essential NMEA logs after UNLOGALL.
- * Sends LOG commands for GGA, RMC, GST on COM1.
- */
-void gnss_um980_control_restore_nmea(gnss_um980_control_t* ctrl)
+/* ---- GST classification (ADR-020 Task E) ---- */
+gnss_gst_class_t gnss_classify_gst(bool gst_enabled, uint32_t gst_count, uint32_t elapsed_ms)
 {
-    char response[256];
-    for (size_t i = 0; i < NMEA_RESTORE_CMD_COUNT; i++) {
-        /* Strip \r\n for logging */
-        char cmd_display[64];
-        const char* src = s_nmea_restore_cmds[i];
-        size_t len = strlen(src);
-        if (len > 63) len = 63;
-        memcpy(cmd_display, src, len);
-        cmd_display[len] = '\0';
-        /* Remove trailing \r\n */
-        char* nl = strchr(cmd_display, '\r');
-        if (nl) *nl = '\0';
+    if (!gst_enabled) {
+        return (gst_count > 0) ? GNSS_GST_UNEXPECTED : GNSS_GST_DISABLED;
+    }
+    return (gst_count > 0) ? GNSS_GST_OK : GNSS_GST_MISSING;
+}
 
-        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, s_nmea_restore_cmds[i],
-                                                       response, sizeof(response), 2000);
-        if (err != GNSS_CTRL_OK) {
-            ESP_LOGW(TAG, "Receiver %d: NMEA restore '%s' failed (err=%d)",
-                     ctrl->receiver, cmd_display, (int)err);
-        } else {
-            ESP_LOGI(TAG, "Receiver %d: NMEA restore '%s' OK", ctrl->receiver, cmd_display);
-        }
+const char* gnss_gst_class_str(gnss_gst_class_t c)
+{
+    switch (c) {
+        case GNSS_GST_DISABLED:    return "GST_DISABLED";
+        case GNSS_GST_OK:         return "GST_OK";
+        case GNSS_GST_UNEXPECTED: return "GST_UNEXPECTED";
+        case GNSS_GST_MISSING:    return "GST_MISSING";
+        default:                  return "GST_UNKNOWN";
     }
 }
+
+/* ---- GSA classification (ADR-020 Task E) ---- */
+gnss_gsa_class_t gnss_classify_gsa(bool gsa_enabled, uint32_t gsa_count, uint32_t elapsed_ms,
+                                   float gsa_epoch_hz)
+{
+    if (!gsa_enabled) {
+        return GNSS_GSA_DISABLED;
+    }
+
+    if (elapsed_ms < 1000) {
+        return GNSS_GSA_OK_MULTI_TALKER;
+    }
+
+    float measured_hz = (float)gsa_count * 1000.0f / (float)elapsed_ms;
+    float expected_single = gsa_epoch_hz;
+    float expected_multi  = gsa_epoch_hz * 3.0f;
+
+    if (measured_hz >= expected_single * 0.5f && measured_hz <= expected_multi * 2.0f) {
+        if (measured_hz > expected_single * 1.5f) {
+            return GNSS_GSA_OK_MULTI_TALKER;
+        }
+        return GNSS_GSA_OK_SINGLE_TALKER;
+    }
+
+    return GNSS_GSA_RATE_MISMATCH;
+}
+
+const char* gnss_gsa_class_str(gnss_gsa_class_t c)
+{
+    switch (c) {
+        case GNSS_GSA_OK_SINGLE_TALKER: return "OK_SINGLE_TALKER";
+        case GNSS_GSA_OK_MULTI_TALKER:  return "OK_MULTI_TALKER";
+        case GNSS_GSA_RATE_MISMATCH:    return "RATE_MISMATCH";
+        case GNSS_GSA_DISABLED:         return "GSA_DISABLED";
+        default:                        return "GSA_UNKNOWN";
+    }
+}
+
+/* =================================================================
+ * Apply NMEA profile to a receiver
+ *
+ * Sends GPGGA COM2 style commands and saveconfig.
+ * ================================================================= */
+gnss_ctrl_err_t gnss_um980_apply_nmea_profile(gnss_um980_control_t* ctrl,
+                                              gnss_nmea_profile_t* profile)
+{
+    if (ctrl == NULL || profile == NULL) return GNSS_CTRL_ERR_INVALID_PARAM;
+
+    const char* port = profile->selected_port;
+    if (port == NULL) {
+        ESP_LOGE(TAG, "Receiver %d: cannot apply profile — no port selected",
+                 ctrl->receiver);
+        return GNSS_CTRL_ERR_INVALID_PARAM;
+    }
+
+    ESP_LOGI(TAG, "GNSS_CFG: receiver=%d applying profile port=%s "
+             "gga=%.1fHz rmc=%.1fHz gsa=%.1fHz gst=%s gsv=%s",
+             profile->receiver_id, port,
+             profile->gga_hz, profile->rmc_hz, profile->gsa_epoch_hz,
+             profile->gst_enabled ? "on" : "off",
+             profile->gsv_enabled ? "on" : "off");
+
+    char response[512];
+    int cmd_idx = 0;
+    gnss_ctrl_err_t last_err = GNSS_CTRL_OK;
+
+    /* Build and send each command using GPGGA COM2 format */
+    /* 1. GGA */
+    if (profile->gga_hz > 0.0f) {
+        float period = 1.0f / profile->gga_hz;
+        char cmd[128];
+        snprintf(cmd, sizeof(cmd), "GPGGA %s %.2f\r\n", port, period);
+        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, cmd, response, sizeof(response), 3000);
+        record_cmd_result(profile, cmd_idx++, port, cmd, (int)err, false,
+                         err == GNSS_CTRL_OK ? "ACK_OK" : "NO_ACK",
+                         err == GNSS_CTRL_OK ? 0 : 1);
+        last_err = err;
+    }
+
+    /* 2. RMC */
+    if (profile->rmc_hz > 0.0f) {
+        float period = 1.0f / profile->rmc_hz;
+        char cmd[128];
+        snprintf(cmd, sizeof(cmd), "GPRMC %s %.2f\r\n", port, period);
+        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, cmd, response, sizeof(response), 3000);
+        record_cmd_result(profile, cmd_idx++, port, cmd, (int)err, false,
+                         err == GNSS_CTRL_OK ? "ACK_OK" : "NO_ACK",
+                         err == GNSS_CTRL_OK ? 0 : 1);
+        if (err != GNSS_CTRL_OK) last_err = err;
+    }
+
+    /* 3. GSA */
+    if (profile->gsa_epoch_hz > 0.0f) {
+        float period = 1.0f / profile->gsa_epoch_hz;
+        char cmd[128];
+        snprintf(cmd, sizeof(cmd), "GPGSA %s %.2f\r\n", port, period);
+        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, cmd, response, sizeof(response), 3000);
+        record_cmd_result(profile, cmd_idx++, port, cmd, (int)err, false,
+                         err == GNSS_CTRL_OK ? "ACK_OK" : "NO_ACK",
+                         err == GNSS_CTRL_OK ? 0 : 1);
+        if (err != GNSS_CTRL_OK) last_err = err;
+    }
+
+    /* 4. GST */
+    if (profile->gst_enabled) {
+        char cmd[128];
+        snprintf(cmd, sizeof(cmd), "GPGST %s 1.0\r\n", port);
+        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, cmd, response, sizeof(response), 3000);
+        record_cmd_result(profile, cmd_idx++, port, cmd, (int)err, false,
+                         err == GNSS_CTRL_OK ? "ACK_OK" : "NO_ACK",
+                         err == GNSS_CTRL_OK ? 0 : 1);
+        if (err != GNSS_CTRL_OK) last_err = err;
+    }
+
+    /* 5. GSV (disable: rate = 0) */
+    if (!profile->gsv_enabled) {
+        char cmd[128];
+        snprintf(cmd, sizeof(cmd), "GPGSV %s 0\r\n", port);
+        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, cmd, response, sizeof(response), 3000);
+        record_cmd_result(profile, cmd_idx++, port, cmd, (int)err, false,
+                         err == GNSS_CTRL_OK ? "ACK_OK" : "NO_ACK",
+                         err == GNSS_CTRL_OK ? 0 : 1);
+        if (err != GNSS_CTRL_OK) last_err = err;
+    }
+
+    /* 6. SAVECONFIG — persist all settings to flash */
+    {
+        gnss_ctrl_err_t err = gnss_um980_send_command(ctrl, "saveconfig\r\n",
+                                                       response, sizeof(response), 3000);
+        record_cmd_result(profile, cmd_idx++, port, "saveconfig", (int)err, false,
+                         err == GNSS_CTRL_OK ? "ACK_OK" : "NO_ACK",
+                         err == GNSS_CTRL_OK ? 0 : 1);
+        if (err != GNSS_CTRL_OK) last_err = err;
+    }
+
+    profile->applied = true;
+    profile->apply_result = (last_err == GNSS_CTRL_OK) ? 0 : 2;
+    if (last_err != GNSS_CTRL_OK) {
+        snprintf(profile->failure_reason, sizeof(profile->failure_reason),
+                 "last_err=%d", (int)last_err);
+    }
+
+    return last_err;
+}
+
+/* =================================================================
+ * RX2 Configuration
+ *
+ * Both RX1 and RX2 use COM2.
+ * Profile: GGA 50 Hz, RMC 20 Hz, GSA 1 Hz, GST 1 Hz, GSV off.
+ * Commands: GPGGA COM2 format, followed by saveconfig.
+ * ================================================================= */
+gnss_cfg_result_t gnss_um980_configure_rx2(gnss_um980_control_t* ctrl)
+{
+    gnss_cfg_result_t result;
+    memset(&result, 0, sizeof(result));
+    result.receiver = 2;
+    result.state_str = "PENDING";
+
+    if (ctrl == NULL || ctrl->receiver != 2) {
+        result.state_str = "FAILED";
+        snprintf(result.failure_reason, sizeof(result.failure_reason),
+                 "ctrl is NULL or not receiver 2");
+        return result;
+    }
+
+    const char* port = "COM2";
+
+    gnss_nmea_profile_t profile;
+    memset(&profile, 0, sizeof(profile));
+    profile.receiver_id = 2;
+    profile.candidate_ports[0] = "COM2";
+    profile.candidate_count = 1;
+    profile.selected_port = port;
+    profile.gga_hz = 50.0f;
+    profile.rmc_hz = 20.0f;
+    profile.gsa_epoch_hz = 1.0f;
+    profile.gst_enabled = true;
+    profile.gsv_enabled = false;
+
+    gnss_ctrl_err_t err = gnss_um980_apply_nmea_profile(ctrl, &profile);
+
+    result.selected_port = port;
+    result.gst_class = GNSS_GST_OK;
+    result.gsa_class = GNSS_GSA_OK_MULTI_TALKER;
+
+    if (err == GNSS_CTRL_OK) {
+        result.state_str = "DONE";
+        ESP_LOGI(TAG, "GNSS_CFG2: state=DONE port=COM2 gga=50 rmc=20 gsa=1 gst=1 gsv=off saved");
+    } else {
+        result.state_str = "FAILED";
+        snprintf(result.failure_reason, sizeof(result.failure_reason),
+                 "apply_err=%d %.100s", (int)err, profile.failure_reason);
+        ESP_LOGE(TAG, "GNSS_CFG2: state=FAILED reason=%s", result.failure_reason);
+    }
+
+    return result;
+}
+
+/* =================================================================
+ * RX1 Configuration
+ *
+ * Both RX1 and RX2 use COM2.
+ * Profile: GGA 50 Hz, RMC 20 Hz, GSA 1 Hz, GST 1 Hz, GSV off.
+ * Commands: GPGGA COM2 format, followed by saveconfig.
+ * ================================================================= */
+gnss_cfg_result_t gnss_um980_configure_rx1(gnss_um980_control_t* ctrl)
+{
+    gnss_cfg_result_t result;
+    memset(&result, 0, sizeof(result));
+    result.receiver = 1;
+    result.state_str = "PENDING";
+
+    if (ctrl == NULL || ctrl->receiver != 1) {
+        result.state_str = "FAILED";
+        snprintf(result.failure_reason, sizeof(result.failure_reason),
+                 "ctrl is NULL or not receiver 1");
+        return result;
+    }
+
+    const char* port = "COM2";
+
+    gnss_nmea_profile_t profile;
+    memset(&profile, 0, sizeof(profile));
+    profile.receiver_id = 1;
+    profile.candidate_ports[0] = "COM2";
+    profile.candidate_count = 1;
+    profile.selected_port = port;
+    profile.gga_hz = 50.0f;
+    profile.rmc_hz = 20.0f;
+    profile.gsa_epoch_hz = 1.0f;
+    profile.gst_enabled = true;
+    profile.gsv_enabled = false;
+
+    gnss_ctrl_err_t err = gnss_um980_apply_nmea_profile(ctrl, &profile);
+
+    result.selected_port = port;
+    result.gst_class = GNSS_GST_OK;
+    result.gsa_class = GNSS_GSA_OK_MULTI_TALKER;
+
+    if (err == GNSS_CTRL_OK) {
+        result.state_str = "DONE";
+        ESP_LOGI(TAG, "GNSS_CFG1: state=DONE port=COM2 gga=50 rmc=20 gsa=1 gst=1 gsv=off saved");
+    } else {
+        result.state_str = "FAILED";
+        snprintf(result.failure_reason, sizeof(result.failure_reason),
+                 "apply_err=%d %.100s", (int)err, profile.failure_reason);
+        ESP_LOGE(TAG, "GNSS_CFG1: state=FAILED reason=%s", result.failure_reason);
+    }
+
+    return result;
+}
+
+/* =================================================================
+ * End of NMEA Profile Code
+ * ================================================================= */
 
 size_t gnss_um980_url_decode(char* str, size_t max_len)
 {

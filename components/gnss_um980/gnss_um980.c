@@ -33,6 +33,7 @@ static void gnss_um980_rebuild_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
     /* ---- Update position from GGA ---- */
     if (rx->gga_dirty && rx->gga_valid) {
         snap->last_gga_time_ms = timestamp_ms;
+        snap->last_gga_fix_quality = rx->gga.fix_quality;  /* ADR-020: track raw fix_quality */
 
         if (gga_has_valid_fix(&rx->gga)) {
             /* GOOD GGA: update position data AND set valid */
@@ -58,6 +59,8 @@ static void gnss_um980_rebuild_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
     /* ---- Update motion from RMC ---- */
     if (rx->rmc_dirty && rx->rmc_valid) {
         snap->last_rmc_time_ms = timestamp_ms;
+        /* ADR-020: track raw RMC status character */
+        snap->last_rmc_status = rx->rmc.status_valid ? 'A' : 'V';
 
         if (rx->rmc.status_valid) {
             /* GOOD RMC (status A): update motion data AND set valid */
@@ -67,7 +70,8 @@ static void gnss_um980_rebuild_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
             snap->motion_valid = true;
             if (snap->status_reason == GNSS_REASON_NONE ||
                 snap->status_reason == GNSS_REASON_RMC_VOID ||
-                snap->status_reason == GNSS_REASON_NO_RMC) {
+                snap->status_reason == GNSS_REASON_NO_RMC ||
+                snap->status_reason == GNSS_REASON_RMC_STATUS_V) {
                 snap->status_reason = GNSS_REASON_NONE;
             }
         }
@@ -89,6 +93,10 @@ static void gnss_um980_rebuild_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
 
     /* ---- Compute composite valid ---- */
     snap->valid = snap->position_valid && snap->motion_valid;
+
+    /* ---- ADR-020: Snapshot rebuild tracking ---- */
+    snap->last_rebuild_time_ms = timestamp_ms;
+    snap->rebuild_pending = false;
 
     /* ---- Copy cumulative statistics ---- */
     snap->gga_count        = rx->gga_count;
@@ -245,6 +253,95 @@ void gnss_um980_finalize_snapshot(gnss_um980_t* rx, uint64_t timestamp_ms)
     gnss_um980_rebuild_snapshot(rx, timestamp_ms);
 }
 
+/* ---- NMEA rate measurement (from 015_UART_STABILIZING, logging only) ---- */
+
+/* Rate measurement constants */
+#define GNSS_RATE_WINDOW_MS    5000    /* 5-second sliding window */
+#define GNSS_RATE_MIN_WINDOW_MS 1000   /* minimum window for valid rate */
+
+/* Rate thresholds for status flags */
+#define GNSS_RATE_GGA_HIGH_HZ     30.0f
+#define GNSS_RATE_RMC_HIGH_HZ     30.0f
+#define GNSS_RATE_GST_HIGH_HZ     30.0f
+#define GNSS_RATE_GSA_HIGH_HZ      5.0f
+#define GNSS_RATE_GSV_ACTIVE_HZ    0.2f
+#define GNSS_RATE_TOTAL_HIGH_HZ   90.0f
+#define GNSS_RATE_DUPLICATE_HZ   120.0f
+
+/* Rate guard: max auto-recovery attempts per boot */
+#define GNSS_RATE_GUARD_MAX_RECOVERIES 1
+
+/* Internal: update NMEA rate measurement (pure diagnostic, no functional side-effects) */
+static void gnss_um980_update_rate(gnss_um980_t* rx, uint64_t timestamp_ms)
+{
+    if (rx == NULL) return;
+
+    uint32_t counts[5] = {
+        rx->gga_count,
+        rx->rmc_count,
+        rx->gst_count,
+        rx->gsa_count,
+        rx->gsv_count
+    };
+
+    rx->nmea_rate.curr_time_ms = timestamp_ms;
+
+    if (rx->nmea_rate.prev_time_ms == 0) {
+        /* First sample — just store baseline */
+        memcpy(rx->nmea_rate.prev_counts, counts, sizeof(counts));
+        rx->nmea_rate.prev_time_ms = timestamp_ms;
+        rx->nmea_rate.warmup = true;
+        return;
+    }
+
+    uint64_t delta_ms = timestamp_ms - rx->nmea_rate.prev_time_ms;
+
+    /* Only compute rate if window is large enough */
+    if (delta_ms < GNSS_RATE_MIN_WINDOW_MS) {
+        return;
+    }
+
+    rx->nmea_rate.window_ms = (uint32_t)delta_ms;
+
+    /* rate_hz = (count_now - count_prev) * 1000.0 / delta_ms */
+    float total = 0.0f;
+    for (int i = 0; i < 5; i++) {
+        uint32_t delta_count = counts[i] - rx->nmea_rate.prev_counts[i];
+        float hz = (delta_ms > 0) ? ((float)delta_count * 1000.0f / (float)delta_ms) : 0.0f;
+        rx->nmea_rate.rates_hz[i] = hz;
+        total += hz;
+    }
+    rx->nmea_rate.total_hz = total;
+
+    /* bytes_per_sec = bytes_delta * 1000.0 / delta_ms
+     * We don't store prev_bytes, so approximate from total */
+    if (delta_ms > 0) {
+        /* Note: bytes_received is cumulative; we can't compute exact bytes/s
+         * without storing prev_bytes. Approximate from first window only. */
+        rx->nmea_rate.bytes_per_sec = 0.0f; /* placeholder, computed externally if needed */
+    }
+
+    /* Update per-type rate status flags (NAV-UART-STABILIZING-R1) */
+    rx->nmea_rate.gga_high = (rx->nmea_rate.rates_hz[0] > GNSS_RATE_GGA_HIGH_HZ);
+    rx->nmea_rate.rmc_high = (rx->nmea_rate.rates_hz[1] > GNSS_RATE_RMC_HIGH_HZ);
+    rx->nmea_rate.gst_missing = (rx->nmea_rate.rates_hz[2] < 0.5f &&
+                                  rx->nmea_rate.sample_count > 2);
+    rx->nmea_rate.gsa_high = (rx->nmea_rate.rates_hz[3] > GNSS_RATE_GSA_HIGH_HZ);
+    rx->nmea_rate.gsv_active = (rx->nmea_rate.rates_hz[4] > GNSS_RATE_GSV_ACTIVE_HZ);
+    rx->nmea_rate.rate_high = (rx->nmea_rate.gga_high ||
+                                rx->nmea_rate.rmc_high ||
+                                rx->nmea_rate.gsa_high);
+    rx->nmea_rate.duplicate_gga = (rx->nmea_rate.rates_hz[0] > GNSS_RATE_GGA_HIGH_HZ * 1.5f);
+    rx->nmea_rate.duplicate_rmc = (rx->nmea_rate.rates_hz[1] > GNSS_RATE_RMC_HIGH_HZ * 1.5f);
+    rx->nmea_rate.duplicate_suspected = (total > GNSS_RATE_DUPLICATE_HZ);
+
+    /* Slide window */
+    memcpy(rx->nmea_rate.prev_counts, counts, sizeof(counts));
+    rx->nmea_rate.prev_time_ms = timestamp_ms;
+    rx->nmea_rate.warmup = false;
+    rx->nmea_rate.sample_count++;
+}
+
 void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us)
 {
     gnss_um980_t* rx = (gnss_um980_t*)comp;
@@ -292,6 +389,9 @@ void gnss_um980_service_step(runtime_component_t* comp, uint64_t timestamp_us)
     if (was_fresh && !rx->snapshot.fresh && rx->snapshot.valid) {
         rx->timeout_events++;
     }
+
+    /* Update NMEA rate measurement (pure diagnostic, no functional side-effects) */
+    gnss_um980_update_rate(rx, ts_ms);
 }
 
 const nmea_gga_t* gnss_um980_get_gga(const gnss_um980_t* rx)
@@ -397,4 +497,7 @@ void gnss_um980_fast_process(runtime_component_t* comp, const fast_cycle_context
     if (was_fresh && !rx->snapshot.fresh && rx->snapshot.valid) {
         rx->timeout_events++;
     }
+
+    /* Update NMEA rate measurement in fast path (pure diagnostic) */
+    gnss_um980_update_rate(rx, ts_ms);
 }

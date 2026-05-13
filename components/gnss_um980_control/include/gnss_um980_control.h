@@ -4,10 +4,9 @@
  *
  * SparkFun-style command/response layer for UM980 receivers.
  * Provides exclusive UART access with NMEA parser suspension,
- * automatic CRLF appending, URL decoding, and command blocklist.
+ * automatic CRLF appending, and URL decoding.
  *
  * Safety:
- *   - Commands are validated against a blocklist (FRESET, SAVECONFIG, RESET, UPGRADE)
  *   - UART mutex ensures exclusive access during command cycles
  *   - NMEA parser is suspended (rx_source=NULL) to prevent data corruption
  *   - On timeout/failure: parser is always restored, system continues
@@ -47,11 +46,10 @@ extern "C" {
 #define GNSS_CTRL_MUTEX_TIMEOUT    5000    /* Max wait for UART mutex (ms) */
 #define GNSS_CTRL_CMD_MAX_LEN      256     /* Max command string length */
 
-/* ---- Boot-time UNLOGALL flag ----
- * When enabled, the boot snapshot sends UNLOGALL before querying
- * and restores essential NMEA logs (GGA, RMC, GST) after.
- * DISABLED BY DEFAULT — enable only after verifying UM980 LOG command syntax. */
-#define GNSS_CTRL_UNLOGALL_AT_BOOT  1
+/* ---- NMEA profile defaults (ADR-020 Task C) ---- *
+ * Both RX1 and RX2 use COM2 (no port probing needed).
+ * GGA 50 Hz, RMC 20 Hz, GSA 1 Hz epoch, GST 1 Hz, GSV disabled.
+ */
 
 /* ---- Error codes ---- */
 typedef enum {
@@ -61,7 +59,6 @@ typedef enum {
     GNSS_CTRL_ERR_TIMEOUT,         /* No response within timeout */
     GNSS_CTRL_ERR_UART_BUSY,       /* Mutex acquire failed (command in progress) */
     GNSS_CTRL_ERR_TX_FAILED,       /* transport_uart_tx_write returned 0 */
-    GNSS_CTRL_ERR_BLOCKED,         /* Command matched blocklist prefix */
     GNSS_CTRL_ERR_EXPECT_FAILED,   /* Expected header not found in response */
 } gnss_ctrl_err_t;
 
@@ -81,7 +78,6 @@ typedef struct {
     uint32_t commands_sent;
     uint32_t commands_ok;
     uint32_t commands_timeout;
-    uint32_t commands_blocked;
 } gnss_um980_control_t;
 
 /* ---- Public API ---- */
@@ -115,7 +111,6 @@ gnss_um980_control_t* gnss_um980_control_get(int receiver);
  * Send a command and collect the response.
  *
  * Automatically:
- *   - Validates against blocklist
  *   - Appends \r\n if not present
  *   - Suspends NMEA parser during command
  *   - Retries on timeout (up to GNSS_CTRL_MAX_RETRIES)
@@ -151,30 +146,114 @@ gnss_ctrl_err_t gnss_um980_send_command_expect(gnss_um980_control_t* ctrl,
                                                uint32_t timeout_ms);
 
 /**
- * Check if a command string is blocked by the safety blocklist.
- * Blocked prefixes: FRESET, SAVECONFIG, RESET, UPGRADE (case-insensitive).
- */
-bool gnss_um980_control_is_command_blocked(const char* cmd);
-
-/**
- * Send UNLOGALL to stop all NMEA logging.
- * Typically called before querying config to get clean responses.
- */
-gnss_ctrl_err_t gnss_um980_control_unlogall(gnss_um980_control_t* ctrl);
-
-/**
- * Restore essential NMEA logs after UNLOGALL.
- * Sends LOG commands for GNGGA, GNRMC, GNGST, GNGSV, GNGSA on COM2
- * at appropriate rates for 20 Hz operation.
- */
-void gnss_um980_control_restore_nmea(gnss_um980_control_t* ctrl);
-
-/**
  * URL-decode a string in place (%XX hex, + as space).
  * Decodes at most max_len bytes (including NUL terminator).
  * Returns length of decoded string.
  */
 size_t gnss_um980_url_decode(char* str, size_t max_len);
+
+/* ---- NMEA Profile Configuration (ADR-020 Task C) ---- *
+ * Per-receiver NMEA sentence configuration.
+ * Both RX1 and RX2 use COM2 (no port probing needed).
+ */
+
+/* Maximum candidate ports per receiver */
+#define GNSS_NMEA_MAX_PORTS       2
+#define GNSS_NMEA_MAX_PORT_LEN    8    /* e.g. "COM1", "COM2" */
+
+/* GST classification states (ADR-020 Task E) */
+typedef enum {
+    GNSS_GST_DISABLED = 0,   /* GST is not enabled — gst_count should be 0 */
+    GNSS_GST_OK,            /* GST enabled and in target rate range */
+    GNSS_GST_UNEXPECTED,    /* GST running despite being disabled */
+    GNSS_GST_MISSING        /* GST enabled but no GST sentences received */
+} gnss_gst_class_t;
+
+/* GSA classification states (ADR-020 Task E) */
+typedef enum {
+    GNSS_GSA_OK_SINGLE_TALKER = 0,  /* 1 Hz epoch, 1 sentence/s */
+    GNSS_GSA_OK_MULTI_TALKER,       /* 1 Hz epoch, ~3 sentences/s (multi-constellation) */
+    GNSS_GSA_RATE_MISMATCH,         /* Sentence rate outside expected range */
+    GNSS_GSA_DISABLED                /* GSA not enabled */
+} gnss_gsa_class_t;
+
+/* NMEA sentence rate verification result (ADR-020 Task D) */
+typedef struct {
+    const char* sentence;       /* e.g. "GNGGA", "GNRMC" */
+    float target_hz;            /* Target rate (e.g. 10.0) */
+    float measured_hz;          /* Measured rate from counter delta */
+    float tolerance_hz;         /* Acceptable deviation (e.g. 2.0) */
+    bool  in_range;             /* measured within target +/- tolerance */
+} gnss_rate_check_t;
+
+/* Command ACK + Effect result (ADR-020 Task D) */
+typedef struct {
+    int    receiver;            /* 1 or 2 */
+    const char* port;           /* e.g. "COM1", "COM2" */
+    const char* command;        /* e.g. "GPGGA COM2 0.02" */
+    int    ack_status;          /* 0=OK, >0 = gnss_ctrl_err_t code */
+    bool   effect_verified;     /* true if post-command rate check passed */
+    const char* effect_detail;  /* human-readable effect result */
+    int    decision;            /* 0=ACCEPT, 1=REJECT_NO_ACK, 2=REJECT_NO_EFFECT */
+} gnss_cmd_result_t;
+
+/* Per-receiver NMEA profile (ADR-020 Task C) */
+typedef struct {
+    int    receiver_id;
+    const char* candidate_ports[GNSS_NMEA_MAX_PORTS]; /* e.g. COM2 for both RX */
+    int    candidate_count;
+    const char* selected_port;    /* "COM2" for both receivers */
+    float  gga_hz;               /* Target GGA rate (e.g. 50.0) */
+    float  rmc_hz;               /* Target RMC rate (e.g. 20.0) */
+    float  gsa_epoch_hz;         /* Target GSA epoch rate (e.g. 1.0) */
+    float  gst_period;           /* GST period (1.0 = 1 Hz) */
+    bool   gst_enabled;           /* Whether GST should be enabled */
+    bool   gsv_enabled;           /* Whether GSV should be enabled */
+    /* Post-apply verification results */
+    bool   applied;               /* true if profile was applied */
+    int    apply_result;          /* 0=SUCCESS, 1=PARTIAL, 2=FAILED */
+    gnss_gst_class_t  gst_class;
+    gnss_gsa_class_t  gsa_class;
+    gnss_cmd_result_t cmd_results[8]; /* Results of individual LOG commands */
+    int    cmd_result_count;
+    /* Failure reason if apply_result != SUCCESS */
+    char   failure_reason[128];
+} gnss_nmea_profile_t;
+
+/* Port probe result (ADR-020 Task C — legacy, both RX now use COM2) */
+typedef struct {
+    const char* port;
+    int    probe_ack;           /* 0=ACK received, >0 = error code */
+    bool   effect_gga_confirmed;
+    bool   effect_rmc_confirmed;
+    bool   effect_gsv_disabled;
+    bool   overall_pass;
+} gnss_port_probe_t;
+
+/* Overall GNSS config state for a receiver */
+typedef struct {
+    int    receiver;
+    const char* state_str;       /* "DONE", "FAILED", "PENDING" */
+    const char* selected_port;
+    gnss_gst_class_t  gst_class;
+    gnss_gsa_class_t  gsa_class;
+    gnss_port_probe_t port_probes[GNSS_NMEA_MAX_PORTS];
+    int    port_probe_count;
+    char   failure_reason[128];
+} gnss_cfg_result_t;
+
+/* Forward declarations for NMEA profile functions */
+gnss_ctrl_err_t gnss_um980_apply_nmea_profile(gnss_um980_control_t* ctrl,
+                                              gnss_nmea_profile_t* profile);
+gnss_cfg_result_t gnss_um980_configure_rx2(gnss_um980_control_t* ctrl);
+gnss_cfg_result_t gnss_um980_configure_rx1(gnss_um980_control_t* ctrl);
+
+/* GST/GSA classification helpers */
+gnss_gst_class_t gnss_classify_gst(bool gst_enabled, uint32_t gst_count, uint32_t elapsed_ms);
+gnss_gsa_class_t gnss_classify_gsa(bool gsa_enabled, uint32_t gsa_count, uint32_t elapsed_ms,
+                                   float gsa_epoch_hz);
+const char* gnss_gst_class_str(gnss_gst_class_t c);
+const char* gnss_gsa_class_str(gnss_gsa_class_t c);
 
 #ifdef __cplusplus
 }

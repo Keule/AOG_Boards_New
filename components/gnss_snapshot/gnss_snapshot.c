@@ -22,6 +22,10 @@ void gnss_snapshot_init(gnss_snapshot_t* snap)
     snap->status_reason = GNSS_REASON_NONE;
     snap->last_error = GNSS_ERR_NONE;
     snap->correction_age_valid = false;
+    snap->last_gga_fix_quality = 0;
+    snap->last_rmc_status = '\0';
+    snap->last_rebuild_time_ms = 0;
+    snap->rebuild_pending = false;
 }
 
 void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
@@ -31,14 +35,29 @@ void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
     if (snap == NULL) return;
     if (timeout_ms == 0) timeout_ms = GNSS_FRESHNESS_TIMEOUT_MS_DEFAULT;
 
+    /* ---- Check rebuild_pending (ADR-020: SNAPSHOT_NOT_COMMITTED) ---- */
+    if (snap->rebuild_pending && snap->last_rebuild_time_ms == 0) {
+        snap->position_valid = false;
+        snap->motion_valid = false;
+        snap->valid = false;
+        snap->fresh = false;
+        snap->status_reason = GNSS_REASON_SNAPSHOT_NOT_COMMITTED;
+        return;
+    }
+
     /* ---- GGA freshness: use last VALID GGA (fix>0) for staleness ---- */
     if (snap->last_valid_gga_time_ms == 0) {
-        /* No valid GGA ever received */
-        if (snap->position_valid) {
-            snap->position_valid = false;
-            if (snap->status_reason == GNSS_REASON_NONE) {
-                snap->status_reason = GNSS_REASON_NO_GGA;
-            }
+        /* No valid GGA ever received — determine specific reason */
+        snap->position_valid = false;
+        if (snap->last_gga_time_ms == 0) {
+            /* Never saw any GGA at all */
+            snap->status_reason = GNSS_REASON_NO_GGA;
+        } else if (snap->last_gga_fix_quality == 0) {
+            /* GGA received but fix_quality=0 */
+            snap->status_reason = GNSS_REASON_GGA_FIX_QUALITY_0;
+        } else {
+            /* GGA received with unknown fix quality */
+            snap->status_reason = GNSS_REASON_UNKNOWN_FIX;
         }
     } else {
         uint64_t gga_age = (current_ms > snap->last_valid_gga_time_ms)
@@ -51,9 +70,17 @@ void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
 
     /* ---- RMC freshness: use last VALID RMC (status A) for staleness ---- */
     if (snap->last_valid_rmc_time_ms == 0) {
-        if (snap->motion_valid) {
-            snap->motion_valid = false;
-            if (snap->status_reason == GNSS_REASON_NONE) {
+        snap->motion_valid = false;
+        /* Only overwrite GGA reason if RMC reason is more specific */
+        if (snap->status_reason == GNSS_REASON_STALE_GGA ||
+            snap->status_reason == GNSS_REASON_NONE ||
+            snap->status_reason == GNSS_REASON_GGA_FIX_QUALITY_0 ||
+            snap->status_reason == GNSS_REASON_UNKNOWN_FIX) {
+            if (snap->last_rmc_time_ms == 0) {
+                snap->status_reason = GNSS_REASON_NO_RMC;
+            } else if (snap->last_rmc_status == 'V') {
+                snap->status_reason = GNSS_REASON_RMC_STATUS_V;
+            } else {
                 snap->status_reason = GNSS_REASON_NO_RMC;
             }
         }
@@ -62,7 +89,9 @@ void gnss_snapshot_check_freshness(gnss_snapshot_t* snap,
                            ? current_ms - snap->last_valid_rmc_time_ms : 0;
         if (rmc_age > timeout_ms) {
             snap->motion_valid = false;
-            if (snap->status_reason != GNSS_REASON_STALE_GGA) {
+            if (snap->status_reason != GNSS_REASON_STALE_GGA &&
+                snap->status_reason != GNSS_REASON_NO_GGA &&
+                snap->status_reason != GNSS_REASON_GGA_FIX_QUALITY_0) {
                 snap->status_reason = GNSS_REASON_STALE_RMC;
             }
         }

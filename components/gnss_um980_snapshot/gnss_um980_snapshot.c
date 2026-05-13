@@ -8,15 +8,12 @@
  *
  * Boot sequence:
  *   1. Wait for receiver settle (2s)
- *   2. Optionally send UNLOGALL (GNSS_CTRL_UNLOGALL_AT_BOOT)
- *   3. Query version, config, mode, mask for each receiver
- *   4. Optionally restore essential NMEA logs
- *   5. Store raw ASCII responses in static buffers
+ *   2. Query version, config, mode, mask for each receiver
+ *   3. Configure NMEA rates (GPGGA COM2 format) and saveconfig
+ *   4. Store raw ASCII responses in static buffers
  *
  * Safety:
- *   - NO saveconfig, freset, or mode-changing commands
  *   - Failure does NOT block system boot
- *   - UNLOGALL disabled by default (compile-time flag)
  * ======================================================================== */
 
 #include <string.h>
@@ -51,19 +48,22 @@ static uint32_t s_duration_ms = 0;
 /* ---- Timing macro ---- */
 #define SNAPSHOT_DELAY_MS(ms) vTaskDelay(pdMS_TO_TICKS(ms))
 
-/* ---- Query commands ---- */
+/* ---- Query commands ----
+ * Snapshot queries are READ-ONLY: version, config, mode, mask.
+ * NMEA rate configuration uses GPGGA COM2 format followed by saveconfig.
+ * No UNLOG, UNLOGALL, or ONTIME commands.
+ */
 static const char* const SNAPSHOT_CMDS[] = {
-    "UNLOG COM2",
     "VERSIONA",
     "CONFIG",
     "MODE",
     "MASK",
-    "GNGGA COM2 0.05",
-    "GNRMC COM2 0.05",
-    "GPGST COM2 0.05",
-    "GNGSA COM2 1",
-    "SAVECONFIG",
-    "RESET",
+    "GPGGA COM2 0.02",     /* 50 Hz GGA */
+    "GPRMC COM2 0.05",     /* 20 Hz RMC */
+    "GPGSA COM2 1.0",      /* 1 Hz GSA */
+    "GPGST COM2 1.0",      /* 1 Hz GST */
+    "GPGSV COM2 0",        /* Disable GSV */
+    "saveconfig",          /* Persist to flash */
 };
 
 #define SNAPSHOT_CMD_COUNT (sizeof(SNAPSHOT_CMDS) / sizeof(SNAPSHOT_CMDS[0]))
@@ -243,14 +243,6 @@ bool gnss_um980_snapshot_run_all(void)
     /* Wait for receivers to boot and stabilize */
     SNAPSHOT_DELAY_MS(GNSS_SNAPSHOT_SETTLE_MS);
 
-#if GNSS_CTRL_UNLOGALL_AT_BOOT
-    /* Optional: stop all NMEA logging for clean query responses */
-    ESP_LOGI(TAG, "Sending UNLOGALL to both receivers...");
-    gnss_um980_control_unlogall(gnss_um980_control_get(1));
-    gnss_um980_control_unlogall(gnss_um980_control_get(2));
-    SNAPSHOT_DELAY_MS(500);
-#endif
-
     /* Query receiver 1 */
     ESP_LOGI(TAG, "Querying UM980 Receiver 1...");
     bool rx1_ok = snapshot_query_receiver(0);
@@ -263,12 +255,7 @@ bool gnss_um980_snapshot_run_all(void)
     ESP_LOGI(TAG, "Receiver 2: %s (%zu bytes)",
              rx2_ok ? "OK" : "TIMEOUT/ERROR", s_rx_bytes[1]);
 
-#if GNSS_CTRL_UNLOGALL_AT_BOOT
-    /* Restore essential NMEA logs */
-    ESP_LOGI(TAG, "Restoring NMEA logs on both receivers...");
-    gnss_um980_control_restore_nmea(gnss_um980_control_get(1));
-    gnss_um980_control_restore_nmea(gnss_um980_control_get(2));
-#endif
+    /* NO UNLOGALL, NO restore — snapshot now also configures NMEA rates + saveconfig */
 
     s_duration_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - start;
     s_complete = true;
