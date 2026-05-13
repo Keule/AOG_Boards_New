@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "esp_err.h"
 #include "esp_log.h"
 #include "board_profile.h"
 #include "hal_eth.h"
@@ -44,6 +45,16 @@ void nav_config_boot_init(void)
     hal_err_t ota_ret = hal_ota_init(hal_ota_esp32_ops());
     if (ota_ret != HAL_OK) {
         ESP_LOGW(TAG, "OTA init failed (0x%x)", (unsigned)ota_ret);
+    }
+
+    /* Register OTA + reboot HTTP handlers.
+     * This is Phase 1 — the HTTP server starts via remote_diag_service_step
+     * once Ethernet link-up + IP is received. The handlers are idempotent. */
+    if (ota_ret == HAL_OK) {
+        esp_err_t ota_reg = remote_diag_register_ota_handlers();
+        if (ota_reg != ESP_OK) {
+            ESP_LOGW(TAG, "OTA handlers registered but HTTP server not ready yet");
+        }
     }
 
     s_phase1_done = true;
